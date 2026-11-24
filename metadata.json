@@ -1,0 +1,6 @@
+{
+  "name": "Grandmaster",
+  "description": "International chess platform with Standard Chess, Fischer Chess (Chess960), Daily Puzzles, Engine Analysis, Online Multiplayer, Global Rankings, Tournaments, and Match History.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
