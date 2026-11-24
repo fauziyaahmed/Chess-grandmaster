@@ -192,3 +192,74 @@ fun GrandmasterTheme(
         content = content
     )
 }
+
+val CUSTOM_GRADIENT_SWATCHES: List<Long> = listOf(
+    0xFF0F172AL,
+    0xFF065F46L,
+    0xFF1E1B4BL,
+    0xFF4C1D95L,
+    0xFF7F1D1DL,
+    0xFF78350FL,
+    0xFF0E7490L,
+    0xFF111827L,
+    0xFFBE185DL,
+    0xFFD1FAE5L,
+    0xFFFEF3C7L,
+    0xFFE0F2FEL
+)
+
+val COMMUNITY_THEME_PRESETS: List<ThemeComparisonSetup> = listOf(
+    ThemeComparisonSetup(
+        id = "gm_valkyrie",
+        title = "Nordic Marble Pro",
+        authorLabel = "GM_Valkyrie (NO)",
+        ratingLabel = "2540 Blitz",
+        appTheme = AppThemeOption.MIDNIGHT_ROYAL,
+        boardTheme = BoardTheme.ROYAL_MARBLE,
+        pieceStyle = PieceStyle.CLASSIC_STAUNTON,
+        backgroundPreset = ArenaBackgroundPreset.MARBLE_HALL
+    ),
+    ThemeComparisonSetup(
+        id = "hikaru_tactics",
+        title = "Crimson Speed Arena",
+        authorLabel = "Hikaru_Tactics (US)",
+        ratingLabel = "2610 Bullet",
+        appTheme = AppThemeOption.CRIMSON_GRAND_PRIX,
+        boardTheme = BoardTheme.TOURNAMENT_CRIMSON,
+        pieceStyle = PieceStyle.NEO_GEOMETRIC,
+        backgroundPreset = ArenaBackgroundPreset.CYBER_GRID
+    ),
+    ThemeComparisonSetup(
+        id = "sakura_k960",
+        title = "Nebula 960 Crystal",
+        authorLabel = "Sakura_K960 (JP)",
+        ratingLabel = "2420 Chess960",
+        appTheme = AppThemeOption.MIDNIGHT_ROYAL,
+        boardTheme = BoardTheme.SAPPHIRE_ICE,
+        pieceStyle = PieceStyle.TOURNAMENT_CRYSTAL,
+        backgroundPreset = ArenaBackgroundPreset.COSMIC_NEBULA
+    ),
+    ThemeComparisonSetup(
+        id = "aarav_viswa",
+        title = "Imperial Wood Study",
+        authorLabel = "Aarav_Viswa (IN)",
+        ratingLabel = "2485 Classical",
+        appTheme = AppThemeOption.IMPERIAL_GOLD,
+        boardTheme = BoardTheme.CLASSIC_WALNUT,
+        pieceStyle = PieceStyle.ROYAL_GOLD,
+        backgroundPreset = ArenaBackgroundPreset.MAHOGANY_CLUB
+    ),
+    ThemeComparisonSetup(
+        id = "elena_endgame",
+        title = "Daylight Frost Club",
+        authorLabel = "Elena_Endgame (FR)",
+        ratingLabel = "2390 Rapid",
+        appTheme = AppThemeOption.NORDIC_FROST,
+        boardTheme = BoardTheme.JADE_CRYSTAL,
+        pieceStyle = PieceStyle.CLASSIC_STAUNTON,
+        backgroundPreset = ArenaBackgroundPreset.CUSTOM_GRADIENT,
+        customGradientStartArgb = 0xFFE0F2FEL,
+        customGradientEndArgb = 0xFFD1FAE5L,
+        backgroundDimAlpha = 0.20f
+    )
+)

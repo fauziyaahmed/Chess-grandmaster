@@ -313,4 +313,16 @@ class ExampleRobolectricTest {
         assertEquals(com.example.ui.theme.AppThemeOption.CRIMSON_GRAND_PRIX, setup.appTheme)
         assertEquals(com.example.ui.theme.ArenaBackgroundPreset.COSMIC_NEBULA, setup.backgroundPreset)
     }
+
+    @Test
+    fun `main activity cold start initializes UserSettings and ViewModel cleanly`() {
+        val defaultSettings = com.example.data.preferences.UserSettings()
+        assertEquals(com.example.ui.theme.AppThemeOption.GRANDMASTER_EMERALD, defaultSettings.appTheme)
+        assertTrue(com.example.ui.theme.COMMUNITY_THEME_PRESETS.isNotEmpty())
+
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        assertNotNull(activity)
+        controller.pause().stop().destroy()
+    }
 }
