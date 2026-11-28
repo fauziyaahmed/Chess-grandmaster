@@ -17,9 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.CheckCircle
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,17 +69,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.chess.engine.GameVariant
+import com.example.chess.engine.LogicalAnalytics
+import com.example.chess.engine.Piece
+import com.example.chess.engine.PieceColor
+import com.example.chess.engine.PieceType
 import com.example.data.AchievementItem
 import com.example.data.RatingCalculator
+import com.example.data.SoundEffect
+import com.example.data.SoundPack
 import com.example.data.local.MatchHistoryEntity
 import com.example.data.local.PlayerProfileEntity
+import com.example.data.local.PuzzleAttemptEntity
 import com.example.data.local.RatingSnapshotEntity
 import com.example.data.preferences.AccountMode
 import com.example.data.preferences.UserSettings
+import com.example.ui.components.ChessPieceIcon
 import com.example.ui.components.CountryFlag
-import com.example.ui.components.RatingLineChart
+import com.example.ui.components.LogicalColorOutcomeCard
+import com.example.ui.components.LogicalRatingProgressionCard
+import com.example.ui.components.LogicalSkillRadarCard
 import com.example.ui.theme.AppThemeOption
 import com.example.ui.theme.ArenaBackgroundPreset
+import com.example.ui.theme.BoardPatternStyle
 import com.example.ui.theme.BoardTheme
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.EmeraldPrimary
@@ -92,7 +107,9 @@ fun ProfileScreen(
     achievements: List<AchievementItem>,
     settings: UserSettings,
     onOpenMatchAnalysis: (Long) -> Unit,
-    onOpenThemeStudio: (Int) -> Unit = {}
+    onOpenThemeStudio: (Int) -> Unit = {},
+    onPreviewSound: (SoundEffect) -> Unit = {},
+    puzzleAttempts: List<PuzzleAttemptEntity> = emptyList()
 ) {
     val tab by mainViewModel.profileTabIndex.collectAsStateWithLifecycle()
     var showEditProfile by remember { mutableStateOf(false) }
@@ -112,6 +129,8 @@ fun ProfileScreen(
             0 -> DashboardTab(
                 profile = profile,
                 settings = settings,
+                matches = matches,
+                puzzleAttempts = puzzleAttempts,
                 ratingSnapshots = ratingSnapshots,
                 achievements = achievements,
                 onEditProfile = { showEditProfile = true },
@@ -124,7 +143,8 @@ fun ProfileScreen(
             else -> SettingsTab(
                 mainViewModel = mainViewModel,
                 settings = settings,
-                onOpenThemeStudio = onOpenThemeStudio
+                onOpenThemeStudio = onOpenThemeStudio,
+                onPreviewSound = onPreviewSound
             )
         }
     }
@@ -169,6 +189,8 @@ fun ProfileScreen(
 private fun DashboardTab(
     profile: PlayerProfileEntity,
     settings: UserSettings,
+    matches: List<MatchHistoryEntity>,
+    puzzleAttempts: List<PuzzleAttemptEntity>,
     ratingSnapshots: List<RatingSnapshotEntity>,
     achievements: List<AchievementItem>,
     onEditProfile: () -> Unit,
@@ -182,10 +204,13 @@ private fun DashboardTab(
     val chartValues = remember(ratingSnapshots, selectedChartFormat) {
         ratingSnapshots.filter { it.formatKey == selectedChartFormat }.map { it.rating }
     }
+    val analytics = remember(profile, matches, puzzleAttempts, settings) {
+        LogicalAnalytics.computePlayerAnalytics(profile, matches, puzzleAttempts, settings)
+    }
     val avgDurationSec = if (profile.totalMatches == 0) 0L else profile.totalPlayTimeSeconds / profile.totalMatches
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("profile_dashboard_list"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -323,13 +348,19 @@ private fun DashboardTab(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Box(modifier = Modifier.fillMaxWidth().height(140.dp).padding(12.dp)) {
-                    RatingLineChart(values = chartValues, lineColor = EmeraldPrimary)
-                }
+            LogicalRatingProgressionCard(
+                formatLabel = selectedChartFormat,
+                values = chartValues
+            )
+        }
+
+        // Logical Chess Intelligence Graphs
+        item {
+            Text("Logical Performance Graphs", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(8.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LogicalSkillRadarCard(analytics = analytics)
+                LogicalColorOutcomeCard(analytics = analytics)
             }
         }
 
@@ -576,11 +607,13 @@ private fun MatchHistoryTab(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsTab(
     mainViewModel: MainViewModel,
     settings: UserSettings,
-    onOpenThemeStudio: (Int) -> Unit
+    onOpenThemeStudio: (Int) -> Unit,
+    onPreviewSound: (SoundEffect) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -610,6 +643,9 @@ private fun SettingsTab(
                     }
                     SettingSwitchRow("Train with Coach David by Default", settings.coachDavidDefault) {
                         mainViewModel.setCoachDavidDefault(it)
+                    }
+                    SettingSwitchRow("Coach David Voice (Speak Advice Aloud)", settings.coachVoiceEnabled) {
+                        mainViewModel.setCoachVoiceEnabled(it)
                     }
                 }
             }
@@ -688,6 +724,76 @@ private fun SettingsTab(
                     SettingSwitchRow("Sound Effects", settings.soundEnabled) {
                         mainViewModel.updateSettings { s -> s.copy(soundEnabled = it) }
                     }
+                    if (settings.soundEnabled) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Sound Pack · ${settings.soundPack.displayName}",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = settings.soundPack.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(SoundPack.entries) { pack ->
+                                    FilterChip(
+                                        selected = settings.soundPack == pack,
+                                        onClick = { mainViewModel.selectSoundPack(pack) },
+                                        label = { Text(pack.displayName) },
+                                        modifier = Modifier.testTag("sound_pack_${pack.name}")
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Master Volume: ${(settings.soundVolume * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = settings.soundVolume,
+                                onValueChange = { v -> mainViewModel.updateSoundVolume(v) },
+                                valueRange = 0.0f..1.0f,
+                                modifier = Modifier.testTag("settings_sound_volume_slider")
+                            )
+                            Text(
+                                text = "Preview Chess Audio Clips",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    SoundEffect.MOVE to "Move",
+                                    SoundEffect.CAPTURE to "Capture",
+                                    SoundEffect.CASTLE to "Castle",
+                                    SoundEffect.CHECK to "Check",
+                                    SoundEffect.CHECKMATE to "Checkmate"
+                                ).forEach { (eff, label) ->
+                                    AssistChip(
+                                        onClick = { onPreviewSound(eff) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        },
+                                        label = { Text(label) },
+                                        modifier = Modifier.testTag("preview_sound_${eff.name}")
+                                    )
+                                }
+                            }
+                        }
+                    }
                     SettingSwitchRow("Move Animations", settings.animateMoves) {
                         mainViewModel.updateSettings { s -> s.copy(animateMoves = it) }
                     }
@@ -707,7 +813,7 @@ private fun SettingsTab(
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Board Theme", style = MaterialTheme.typography.titleMedium)
+                    Text("Board Theme (${BoardTheme.entries.size} Combinations)", style = MaterialTheme.typography.titleMedium)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(BoardTheme.entries) { bt ->
                             FilterChip(
@@ -724,14 +830,33 @@ private fun SettingsTab(
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
-                    Text("Piece Style", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Board Frame Pattern", style = MaterialTheme.typography.titleMedium)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(BoardPatternStyle.entries) { pat ->
+                            FilterChip(
+                                selected = settings.boardPattern == pat,
+                                onClick = { mainViewModel.selectBoardPattern(pat) },
+                                label = { Text(pat.displayName) }
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    Text("Piece Style (${PieceStyle.entries.size} Sets)", style = MaterialTheme.typography.titleMedium)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(PieceStyle.entries) { ps ->
                             FilterChip(
                                 selected = settings.pieceStyle == ps,
                                 onClick = { mainViewModel.updateSettings { s -> s.copy(pieceStyle = ps) } },
-                                label = { Text(ps.displayName) }
+                                label = { Text(ps.displayName) },
+                                leadingIcon = {
+                                    ChessPieceIcon(
+                                        piece = Piece(PieceColor.WHITE, PieceType.QUEEN),
+                                        style = ps,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             )
                         }
                     }

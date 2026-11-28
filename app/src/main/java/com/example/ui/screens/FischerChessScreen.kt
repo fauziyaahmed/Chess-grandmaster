@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.PlayArrow
@@ -83,6 +84,7 @@ fun FischerChessScreen(
     onStartFischerGame: (GameSetupConfig) -> Unit,
     onAnalyzePositionFen: (String, Int) -> Unit,
     onOpenMatchAnalysis: (Long) -> Unit,
+    onOpenBluetoothLobby: () -> Unit = {},
     onSaveTimeControlPreference: (Boolean, String, Int, Int, Int) -> Unit = { _, _, _, _, _ -> },
     onSetCoachDavidDefault: (Boolean) -> Unit = {}
 ) {
@@ -241,6 +243,7 @@ fun FischerChessScreen(
                             legalMovesForSelected = emptyList(),
                             lastMoveFrom = null,
                             lastMoveTo = null,
+                            boardPattern = settings.boardPattern,
                             interactive = false,
                             modifier = Modifier.fillMaxWidth().widthIn(max = 320.dp)
                         )
@@ -348,6 +351,9 @@ fun FischerChessScreen(
                             Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("vs Friend")
+                        }
+                        IconButton(onClick = onOpenBluetoothLobby) {
+                            Icon(Icons.Filled.Bluetooth, contentDescription = "Play Chess960 via Bluetooth")
                         }
                         IconButton(onClick = { onAnalyzePositionFen(fen, positionNumber) }) {
                             Icon(Icons.Filled.Analytics, contentDescription = "Analyze 960 Position")

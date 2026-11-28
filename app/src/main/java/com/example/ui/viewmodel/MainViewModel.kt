@@ -6,8 +6,10 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.chess.engine.DailyPuzzleStreakLogic
 import com.example.chess.engine.GameVariant
 import com.example.data.AchievementItem
+import com.example.data.SoundPack
 import com.example.data.local.AnnouncementEntity
 import com.example.data.local.ClubMemberEntity
 import com.example.data.local.MatchHistoryEntity
@@ -24,6 +26,7 @@ import com.example.data.preferences.UserSettings
 import com.example.data.repository.ChessRepository
 import com.example.ui.theme.AppThemeOption
 import com.example.ui.theme.ArenaBackgroundPreset
+import com.example.ui.theme.BoardPatternStyle
 import com.example.ui.theme.BoardTheme
 import com.example.ui.theme.PieceStyle
 import com.example.ui.theme.ThemeComparisonSetup
@@ -147,6 +150,69 @@ class MainViewModel(
         }
     }
 
+    fun setCoachVoiceEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.updateSettings { it.copy(coachVoiceEnabled = enabled) }
+        }
+    }
+
+    fun selectSoundPack(pack: SoundPack) {
+        viewModelScope.launch {
+            settingsStore.updateSettings { it.copy(soundPack = pack) }
+        }
+    }
+
+    fun updateSoundVolume(volume: Float) {
+        viewModelScope.launch {
+            settingsStore.updateSettings { it.copy(soundVolume = volume.coerceIn(0f, 1f)) }
+        }
+    }
+
+    fun recordEndgameCompletion(drillId: String, stars: Int, movesUsed: Int) {
+        viewModelScope.launch {
+            settingsStore.updateSettings { current ->
+                val prev = current.endgameProgress[drillId]
+                val nextStars = maxOf(prev?.stars ?: 0, stars.coerceIn(1, 3))
+                val nextBestMoves = if (prev == null) movesUsed else minOf(prev.bestMoves, movesUsed)
+                val nextMap = current.endgameProgress.toMutableMap().apply {
+                    put(drillId, com.example.data.preferences.EndgameCompletionRecord(nextStars, nextBestMoves))
+                }
+                current.copy(endgameProgress = nextMap)
+            }
+        }
+    }
+
+    fun recordDailyPuzzleCompleted(epochDay: Long) {
+        viewModelScope.launch {
+            settingsStore.updateSettings { current ->
+                val result = DailyPuzzleStreakLogic.recordCompletion(
+                    storedStreak = current.dailyPuzzleStreak,
+                    bestStreak = current.bestDailyPuzzleStreak,
+                    lastEpochDay = current.lastDailyPuzzleEpochDay,
+                    completedEpochDays = current.dailyPuzzleCompletedEpochDays,
+                    todayEpochDay = epochDay
+                )
+                current.copy(
+                    dailyPuzzleStreak = result.streak,
+                    bestDailyPuzzleStreak = result.bestStreak,
+                    lastDailyPuzzleEpochDay = result.lastEpochDay,
+                    dailyPuzzleCompletedEpochDays = result.completedEpochDays
+                )
+            }
+        }
+    }
+
+    fun recordDailyStreakRun(runScore: Int) {
+        if (runScore <= 0) return
+        viewModelScope.launch {
+            settingsStore.updateSettings { current ->
+                current.copy(
+                    bestDailyStreakRun = maxOf(current.bestDailyStreakRun, runScore)
+                )
+            }
+        }
+    }
+
     fun selectAppTheme(theme: AppThemeOption) {
         viewModelScope.launch {
             settingsStore.updateSettings {
@@ -158,6 +224,12 @@ class MainViewModel(
     fun selectBoardTheme(boardTheme: BoardTheme) {
         viewModelScope.launch {
             settingsStore.updateSettings { it.copy(boardTheme = boardTheme) }
+        }
+    }
+
+    fun selectBoardPattern(pattern: BoardPatternStyle) {
+        viewModelScope.launch {
+            settingsStore.updateSettings { it.copy(boardPattern = pattern) }
         }
     }
 

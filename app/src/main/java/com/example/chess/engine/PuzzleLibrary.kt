@@ -349,4 +349,17 @@ object PuzzleLibrary {
         val idx = ((daySeed % ALL_PUZZLES.size) + ALL_PUZZLES.size) % ALL_PUZZLES.size
         return ALL_PUZZLES[idx]
     }
+
+    /**
+     * Progressive tactical ladder for Daily Puzzle Streak mode:
+     * starts with today's Daily Challenge (warm-up) then ramps cleanly by rating.
+     */
+    fun streakLadderForDate(date: LocalDate = LocalDate.now()): List<ChessPuzzle> {
+        val daily = puzzleForDate(date)
+        val dayOffset = (date.dayOfYear % 3)
+        val remaining = ALL_PUZZLES
+            .filter { it.id != daily.id }
+            .sortedWith(compareBy<ChessPuzzle> { it.difficulty.ordinal }.thenBy { (it.rating + dayOffset * 17) })
+        return listOf(daily) + remaining
+    }
 }

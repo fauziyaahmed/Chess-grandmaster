@@ -420,6 +420,10 @@ class ChessEngine {
         var gamePhase = 0
         var whiteBishops = 0
         var blackBishops = 0
+        var whiteNonKingCount = 0
+        var blackNonKingCount = 0
+        var whiteKingSq = -1
+        var blackKingSq = -1
 
         val whitePawnFiles = IntArray(8)
         val blackPawnFiles = IntArray(8)
@@ -468,9 +472,11 @@ class ChessEngine {
             if (p.color == PieceColor.WHITE) {
                 mgWhite += mgVal
                 egWhite += egVal
+                if (p.type == PieceType.KING) whiteKingSq = sq else whiteNonKingCount++
             } else {
                 mgBlack += mgVal
                 egBlack += egVal
+                if (p.type == PieceType.KING) blackKingSq = sq else blackNonKingCount++
             }
         }
 
@@ -515,6 +521,27 @@ class ChessEngine {
                     if (p.color == PieceColor.WHITE) { mgWhite += bonus / 2; egWhite += bonus }
                     else { mgBlack += bonus / 2; egBlack += bonus }
                 }
+            }
+        }
+
+        // Lone-King Endgame Mop-Up: drive defending king to edge/corner & bring attacking king close
+        if (whiteKingSq in 0..63 && blackKingSq in 0..63) {
+            if (blackNonKingCount == 0 && whiteNonKingCount > 0 && egWhite - egBlack >= 250) {
+                val wkF = Square.fileOf(whiteKingSq)
+                val wkR = Square.rankOf(whiteKingSq)
+                val bkF = Square.fileOf(blackKingSq)
+                val bkR = Square.rankOf(blackKingSq)
+                val centerDist = abs(bkF - 3.5) + abs(bkR - 3.5)
+                val kingProximity = 14 - (abs(wkF - bkF) + abs(wkR - bkR))
+                egWhite += (centerDist * 22.0 + kingProximity * 10.0).toInt()
+            } else if (whiteNonKingCount == 0 && blackNonKingCount > 0 && egBlack - egWhite >= 250) {
+                val wkF = Square.fileOf(whiteKingSq)
+                val wkR = Square.rankOf(whiteKingSq)
+                val bkF = Square.fileOf(blackKingSq)
+                val bkR = Square.rankOf(blackKingSq)
+                val centerDist = abs(wkF - 3.5) + abs(wkR - 3.5)
+                val kingProximity = 14 - (abs(wkF - bkF) + abs(wkR - bkR))
+                egBlack += (centerDist * 22.0 + kingProximity * 10.0).toInt()
             }
         }
 

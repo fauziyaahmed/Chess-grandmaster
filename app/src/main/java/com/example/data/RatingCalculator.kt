@@ -67,7 +67,42 @@ object RatingCalculator {
         7 -> 2100
         else -> 2300
     }
+
+    fun calculateExpectedStakes(
+        playerRating: Int,
+        opponentRating: Int,
+        gamesPlayed: Int
+    ): MatchStakes {
+        val winNew = calculateNewRating(playerRating, opponentRating, 1.0, gamesPlayed)
+        val drawNew = calculateNewRating(playerRating, opponentRating, 0.5, gamesPlayed)
+        val lossNew = calculateNewRating(playerRating, opponentRating, 0.0, gamesPlayed)
+        return MatchStakes(
+            winDelta = winNew - playerRating,
+            drawDelta = drawNew - playerRating,
+            lossDelta = lossNew - playerRating
+        )
+    }
+
+    fun performanceRating(
+        opponentRating: Int,
+        score: Double,
+        accuracyPercent: Double
+    ): Int {
+        val outcomeShift = when {
+            score >= 0.99 -> 400
+            score <= 0.01 -> -400
+            else -> 0
+        }
+        val accAdjust = ((accuracyPercent.coerceIn(30.0, 99.0) - 70.0) * 3.5).roundToInt()
+        return (opponentRating + outcomeShift + accAdjust).coerceIn(400, 3200)
+    }
 }
+
+data class MatchStakes(
+    val winDelta: Int,
+    val drawDelta: Int,
+    val lossDelta: Int
+)
 
 data class AchievementItem(
     val id: String,

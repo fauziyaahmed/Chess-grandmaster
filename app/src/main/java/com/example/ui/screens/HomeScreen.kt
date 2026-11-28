@@ -20,8 +20,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Casino
@@ -29,8 +31,11 @@ import androidx.compose.material.icons.filled.Compare
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
@@ -61,6 +66,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.chess.engine.DailyPuzzleStreakLogic
 import com.example.chess.engine.GameVariant
 import com.example.chess.engine.PuzzleLibrary
 import com.example.chess.engine.TimeControl
@@ -73,9 +79,11 @@ import com.example.data.preferences.UserSettings
 import com.example.ui.components.CoachDavidOptionToggle
 import com.example.ui.components.CountryFlag
 import com.example.ui.components.TimeControlPickerSection
+import com.example.ui.theme.BoardTheme
 import com.example.ui.theme.ChampionshipGold
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.PieceStyle
 import com.example.ui.viewmodel.GameSetupConfig
 import com.example.ui.viewmodel.PlayOpponentMode
 import java.time.LocalDate
@@ -92,11 +100,15 @@ fun HomeScreen(
     onStartGame: (GameSetupConfig) -> Unit,
     onOpenFischerHub: () -> Unit,
     onOpenDailyPuzzle: () -> Unit,
+    onOpenDailyStreak: () -> Unit = onOpenDailyPuzzle,
     onOpenMatchAnalysis: (Long) -> Unit,
     onOpenCompete: () -> Unit,
     onOpenHistory: () -> Unit = {},
     onOpenAccountChoice: () -> Unit = {},
     onOpenThemeStudio: (Int) -> Unit = {},
+    onOpenBluetoothLobby: () -> Unit = {},
+    onOpenEndgameTrainer: () -> Unit = {},
+    onOpenLogicalGraphs: () -> Unit = {},
     onSaveTimeControlPreference: (Boolean, String, Int, Int, Int) -> Unit = { _, _, _, _, _ -> },
     onSetCoachDavidDefault: (Boolean) -> Unit = {}
 ) {
@@ -442,8 +454,16 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ArenaModeTile(
+                        title = "Bluetooth Friend",
+                        subtitle = "Wireless Nearby Match",
+                        icon = Icons.Filled.Bluetooth,
+                        accent = Color(0xFF8B5CF6),
+                        modifier = Modifier.weight(1f).testTag("mode_bluetooth_friend"),
+                        onClick = onOpenBluetoothLobby
+                    )
+                    ArenaModeTile(
                         title = "Pass & Play",
-                        subtitle = "${activeTimeControl.label} · Local Friend",
+                        subtitle = "${activeTimeControl.label} · Same Device",
                         icon = Icons.Filled.Groups,
                         accent = ElectricBlue,
                         modifier = Modifier.weight(1f).testTag("mode_pass_play"),
@@ -457,9 +477,22 @@ fun HomeScreen(
                             )
                         }
                     )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ArenaModeTile(
+                        title = "Endgame Trainer",
+                        subtitle = "K+Q, K+R & Mate Patterns",
+                        icon = Icons.Filled.School,
+                        accent = Color(0xFFF59E0B),
+                        modifier = Modifier.weight(1f).testTag("mode_endgame_trainer"),
+                        onClick = onOpenEndgameTrainer
+                    )
                     ArenaModeTile(
                         title = "Spectate Clash",
-                        subtitle = "Watch 2250 AI Engines",
+                        subtitle = "Watch 2250 AI Engines · ${BoardTheme.entries.size} Boards & ${PieceStyle.entries.size} Pieces",
                         icon = Icons.Filled.Visibility,
                         accent = Color(0xFF06B6D4),
                         modifier = Modifier.weight(1f).testTag("mode_spectate"),
@@ -474,11 +507,52 @@ fun HomeScreen(
                         }
                     )
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ArenaModeTile(
+                        title = "Blind Audio Chess",
+                        subtitle = "Voice, Haptics & TalkBack",
+                        icon = Icons.Filled.AccessibilityNew,
+                        accent = Color(0xFF22D3EE),
+                        modifier = Modifier.weight(1f).testTag("mode_blind_chess"),
+                        onClick = {
+                            onStartGame(
+                                GameSetupConfig(
+                                    opponentMode = PlayOpponentMode.VS_AI,
+                                    timeControl = activeTimeControl,
+                                    coachDavidEnabled = true,
+                                    isBlindMode = true
+                                )
+                            )
+                        }
+                    )
+                    ArenaModeTile(
+                        title = "Logical Graphs",
+                        subtitle = "Radar, Outcomes & Flow",
+                        icon = Icons.Filled.Hub,
+                        accent = Color(0xFFA855F7),
+                        modifier = Modifier.weight(1f).testTag("mode_logical_graphs"),
+                        onClick = onOpenLogicalGraphs
+                    )
+                }
             }
         }
 
-        // Daily Chess Puzzle Card
+        // Daily Chess Puzzle & Streak Card
         item {
+            val todayEpoch = LocalDate.now().toEpochDay()
+            val dailyStreakDays = DailyPuzzleStreakLogic.effectiveStreak(
+                storedStreak = settings.dailyPuzzleStreak,
+                lastEpochDay = settings.lastDailyPuzzleEpochDay,
+                todayEpochDay = todayEpoch
+            )
+            val solvedDailyToday = DailyPuzzleStreakLogic.isSolvedToday(
+                lastEpochDay = settings.lastDailyPuzzleEpochDay,
+                completedEpochDays = settings.dailyPuzzleCompletedEpochDays,
+                todayEpochDay = todayEpoch
+            )
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
@@ -489,42 +563,68 @@ fun HomeScreen(
                     .clickable(onClick = onOpenDailyPuzzle)
                     .testTag("home_daily_puzzle_card")
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(EmeraldPrimary.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Filled.Extension, contentDescription = null, tint = EmeraldPrimary)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(EmeraldPrimary.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Extension, contentDescription = null, tint = EmeraldPrimary)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "DAILY PUZZLE · ${dailyPuzzle.difficulty.label.uppercase()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = EmeraldPrimary
+                                )
+                                Text(
+                                    text = dailyPuzzle.title,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "${dailyPuzzle.theme} · Rated ${dailyPuzzle.rating} · ${if (solvedDailyToday) "Cleared Today ✓" else "Daily Streak ${dailyStreakDays}d"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "DAILY PUZZLE · ${dailyPuzzle.difficulty.label.uppercase()}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = EmeraldPrimary
-                            )
-                            Text(
-                                text = dailyPuzzle.title,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = "${dailyPuzzle.theme} · Rated ${dailyPuzzle.rating} · Streak ${profile.puzzleStreak}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Open Daily Puzzle")
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalButton(
+                            onClick = onOpenDailyPuzzle,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (solvedDailyToday) "Replay Daily" else "Solve Daily")
+                        }
+                        Button(
+                            onClick = onOpenDailyStreak,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316)),
+                            modifier = Modifier.weight(1f).testTag("home_daily_streak_btn")
+                        ) {
+                            Icon(Icons.Filled.LocalFireDepartment, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Daily Streak (${dailyStreakDays}d)")
                         }
                     }
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Open Daily Puzzle")
                 }
             }
         }

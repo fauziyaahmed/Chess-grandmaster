@@ -11,6 +11,8 @@ import com.example.chess.engine.GameAnalysisSummary
 import com.example.chess.engine.GameVariant
 import com.example.chess.engine.Move
 import com.example.chess.engine.OpeningBook
+import com.example.chess.engine.OpeningExplorer
+import com.example.chess.engine.OpeningExplorerPosition
 import com.example.data.local.MatchHistoryEntity
 import com.example.data.repository.ChessRepository
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +44,8 @@ data class AnalysisUiState(
     val isAutoPlaying: Boolean = false,
     val openingEco: String = "A00",
     val openingName: String = "Starting Position",
-    val loadedPgn: String = ""
+    val loadedPgn: String = "",
+    val explorerPosition: OpeningExplorerPosition? = null
 )
 
 class AnalysisViewModel(
@@ -132,6 +135,8 @@ class AnalysisViewModel(
             boards.add(cur)
         }
         val (eco, openName) = OpeningBook.identifyOpening(validSans, variant, chess960Pos)
+        val currentBoard = boards.last()
+        val explorer = OpeningExplorer.lookup(currentBoard, variant, chess960Pos)
         _state.value = AnalysisUiState(
             title = title,
             variant = variant,
@@ -141,9 +146,10 @@ class AnalysisViewModel(
             sanMoves = validSans,
             moveSquares = squares,
             currentPly = boards.lastIndex,
-            openingEco = eco,
-            openingName = openName,
-            loadedPgn = pgn
+            openingEco = if (explorer.eco != "A00" && validSans.isEmpty()) explorer.eco else eco,
+            openingName = if (validSans.isEmpty()) openName else if (eco == "A00" && explorer.eco != "A00") explorer.openingName else openName,
+            loadedPgn = pgn,
+            explorerPosition = explorer
         )
         evaluateCurrentPosition()
     }
@@ -151,11 +157,17 @@ class AnalysisViewModel(
     fun goToPly(ply: Int) {
         val cur = _state.value
         val clamped = ply.coerceIn(0, cur.boards.lastIndex)
+        val boardAtPly = cur.boards[clamped]
+        val explorer = OpeningExplorer.lookup(boardAtPly, cur.variant, cur.chess960Pos)
+        val (eco, openName) = OpeningBook.identifyOpening(cur.sanMoves.take(clamped), cur.variant, cur.chess960Pos)
         _state.update {
             it.copy(
                 currentPly = clamped,
                 selectedSquare = null,
-                legalMovesForSelected = emptyList()
+                legalMovesForSelected = emptyList(),
+                openingEco = if (eco == "A00" && explorer.eco != "A00") explorer.eco else eco,
+                openingName = if (clamped == 0) "Starting Position" else if (eco == "A00" && explorer.eco != "A00") explorer.openingName else openName,
+                explorerPosition = explorer
             )
         }
         evaluateCurrentPosition()
@@ -194,27 +206,7 @@ class AnalysisViewModel(
                 it.to == sq || (it.isCastling && it.castleRookFrom == sq)
             }
             if (move != null) {
-                // Branch from currentPly
-                val san = board.toSan(move)
-                val nextBoard = board.makeMove(move)
-                val prefixBoards = cur.boards.subList(0, cur.currentPly + 1) + nextBoard
-                val prefixSans = cur.sanMoves.subList(0, cur.currentPly) + san
-                val prefixSquares = cur.moveSquares.subList(0, cur.currentPly) + (move.from to move.to)
-                val (eco, openName) = OpeningBook.identifyOpening(prefixSans, cur.variant, cur.chess960Pos)
-                _state.update {
-                    it.copy(
-                        boards = prefixBoards,
-                        sanMoves = prefixSans,
-                        moveSquares = prefixSquares,
-                        currentPly = prefixBoards.lastIndex,
-                        selectedSquare = null,
-                        legalMovesForSelected = emptyList(),
-                        openingEco = eco,
-                        openingName = openName,
-                        fullAnalysis = null
-                    )
-                }
-                evaluateCurrentPosition()
+                applyAnalysisMove(cur, board, move)
                 return
             }
         }
@@ -228,10 +220,46 @@ class AnalysisViewModel(
         }
     }
 
+    fun playExplorerMove(san: String) {
+        val cur = _state.value
+        val board = cur.boards[cur.currentPly]
+        val move = board.parseSan(san) ?: return
+        applyAnalysisMove(cur, board, move)
+    }
+
+    private fun applyAnalysisMove(cur: AnalysisUiState, board: ChessBoard, move: Move) {
+        val san = board.toSan(move)
+        val nextBoard = board.makeMove(move)
+        val prefixBoards = cur.boards.subList(0, cur.currentPly + 1) + nextBoard
+        val prefixSans = cur.sanMoves.subList(0, cur.currentPly) + san
+        val prefixSquares = cur.moveSquares.subList(0, cur.currentPly) + (move.from to move.to)
+        val (eco, openName) = OpeningBook.identifyOpening(prefixSans, cur.variant, cur.chess960Pos)
+        val explorer = OpeningExplorer.lookup(nextBoard, cur.variant, cur.chess960Pos)
+        _state.update {
+            it.copy(
+                boards = prefixBoards,
+                sanMoves = prefixSans,
+                moveSquares = prefixSquares,
+                currentPly = prefixBoards.lastIndex,
+                selectedSquare = null,
+                legalMovesForSelected = emptyList(),
+                openingEco = if (eco == "A00" && explorer.eco != "A00") explorer.eco else eco,
+                openingName = if (eco == "A00" && explorer.eco != "A00") explorer.openingName else openName,
+                fullAnalysis = null,
+                explorerPosition = explorer
+            )
+        }
+        evaluateCurrentPosition()
+    }
+
     private fun evaluateCurrentPosition() {
         evalJob?.cancel()
         val cur = _state.value
         val board = cur.boards[cur.currentPly]
+        val explorer = cur.explorerPosition ?: OpeningExplorer.lookup(board, cur.variant, cur.chess960Pos)
+        if (cur.explorerPosition == null) {
+            _state.update { it.copy(explorerPosition = explorer) }
+        }
         evalJob = viewModelScope.launch {
             _state.update { it.copy(isEvaluating = true) }
             val result = withContext(Dispatchers.Default) {

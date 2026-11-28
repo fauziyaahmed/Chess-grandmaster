@@ -66,7 +66,8 @@ import com.example.chess.engine.MoveClassification
 import com.example.data.preferences.UserSettings
 import com.example.ui.components.ChessBoardView
 import com.example.ui.components.EvaluationBar
-import com.example.ui.components.RatingLineChart
+import com.example.ui.components.LogicalEvalFlowGraph
+import com.example.ui.components.OpeningExplorerCard
 import com.example.ui.theme.BestGreen
 import com.example.ui.theme.BlunderRed
 import com.example.ui.theme.BrilliantCyan
@@ -95,7 +96,7 @@ fun AnalyzeScreen(
     val currentAnalyzed = analysisViewModel.currentAnalyzedMove()
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("analyze_list"),
         contentPadding = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -209,6 +210,14 @@ fun AnalyzeScreen(
             }
         }
 
+        // Opening Explorer (Master Games for Current Position)
+        item {
+            OpeningExplorerCard(
+                explorer = state.explorerPosition,
+                onPlayMove = analysisViewModel::playExplorerMove
+            )
+        }
+
         // Navigation Controls
         item {
             Row(
@@ -302,12 +311,13 @@ fun AnalyzeScreen(
                             }
                         }
 
-                        // Eval chart across plies
-                        val chartPts = summary.analyzedMoves.map { it.evalAfterCp.coerceIn(-800, 800) }
-                        if (chartPts.isNotEmpty()) {
-                            Box(modifier = Modifier.fillMaxWidth().height(90.dp)) {
-                                RatingLineChart(values = chartPts, lineColor = EmeraldPrimary)
-                            }
+                        // Logical Eval Flow graph across plies (tap any point to jump to that ply)
+                        if (summary.analyzedMoves.isNotEmpty()) {
+                            LogicalEvalFlowGraph(
+                                analyzedMoves = summary.analyzedMoves,
+                                currentPly = state.currentPly,
+                                onSelectPly = analysisViewModel::goToPly
+                            )
                         }
 
                         // Classification summary chips

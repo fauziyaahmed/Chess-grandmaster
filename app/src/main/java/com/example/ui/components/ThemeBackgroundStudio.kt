@@ -78,9 +78,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.chess.engine.ChessBoard
+import com.example.chess.engine.Piece
+import com.example.chess.engine.PieceColor
+import com.example.chess.engine.PieceType
 import com.example.data.preferences.UserSettings
 import com.example.ui.theme.AppThemeOption
 import com.example.ui.theme.ArenaBackgroundPreset
+import com.example.ui.theme.BoardPatternStyle
 import com.example.ui.theme.BoardTheme
 import com.example.ui.theme.COMMUNITY_THEME_PRESETS
 import com.example.ui.theme.CUSTOM_GRADIENT_SWATCHES
@@ -337,6 +341,7 @@ fun ThemeStudioSheetContent(
     initialTab: Int = 0,
     onSelectAppTheme: (AppThemeOption) -> Unit,
     onSelectBoardTheme: (BoardTheme) -> Unit,
+    onSelectBoardPattern: (BoardPatternStyle) -> Unit = {},
     onSelectPieceStyle: (PieceStyle) -> Unit,
     onSelectBackgroundPreset: (ArenaBackgroundPreset) -> Unit,
     onUpdateCustomGradient: (Long, Long) -> Unit,
@@ -415,6 +420,7 @@ fun ThemeStudioSheetContent(
                 settings = settings,
                 onSelectAppTheme = onSelectAppTheme,
                 onSelectBoardTheme = onSelectBoardTheme,
+                onSelectBoardPattern = onSelectBoardPattern,
                 onSelectPieceStyle = onSelectPieceStyle,
                 onSelectBackgroundPreset = onSelectBackgroundPreset,
                 onUpdateCustomGradient = onUpdateCustomGradient,
@@ -457,6 +463,7 @@ private fun CustomizeThemeTab(
     settings: UserSettings,
     onSelectAppTheme: (AppThemeOption) -> Unit,
     onSelectBoardTheme: (BoardTheme) -> Unit,
+    onSelectBoardPattern: (BoardPatternStyle) -> Unit,
     onSelectPieceStyle: (PieceStyle) -> Unit,
     onSelectBackgroundPreset: (ArenaBackgroundPreset) -> Unit,
     onUpdateCustomGradient: (Long, Long) -> Unit,
@@ -674,8 +681,8 @@ private fun CustomizeThemeTab(
         }
     }
 
-    // 4. Board Themes & Piece Styles
-    Text("Chessboard Style (${BoardTheme.entries.size} Boards)", style = MaterialTheme.typography.titleMedium)
+    // 4. Board Themes, Frame Patterns & Piece Styles
+    Text("Chessboard Colors (${BoardTheme.entries.size} Combinations)", style = MaterialTheme.typography.titleMedium)
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(BoardTheme.entries) { bt ->
             FilterChip(
@@ -693,13 +700,38 @@ private fun CustomizeThemeTab(
         }
     }
 
+    Text("Board Frame Style (${BoardPatternStyle.entries.size} Frames)", style = MaterialTheme.typography.titleMedium)
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.testTag("board_pattern_row")
+    ) {
+        items(BoardPatternStyle.entries) { pattern ->
+            FilterChip(
+                selected = settings.boardPattern == pattern,
+                onClick = { onSelectBoardPattern(pattern) },
+                label = { Text(pattern.displayName) },
+                modifier = Modifier.testTag("board_pattern_chip_${pattern.name}")
+            )
+        }
+    }
+
     Text("Piece Design (${PieceStyle.entries.size} Sets)", style = MaterialTheme.typography.titleMedium)
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.testTag("piece_style_row")
+    ) {
         items(PieceStyle.entries) { ps ->
             FilterChip(
                 selected = settings.pieceStyle == ps,
                 onClick = { onSelectPieceStyle(ps) },
                 label = { Text(ps.displayName) },
+                leadingIcon = {
+                    ChessPieceIcon(
+                        piece = Piece(PieceColor.WHITE, PieceType.KNIGHT),
+                        style = ps,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
                 modifier = Modifier.testTag("piece_chip_${ps.name}")
             )
         }

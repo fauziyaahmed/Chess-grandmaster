@@ -13,13 +13,18 @@ import com.example.chess.engine.PuzzleLibrary
 import com.example.chess.engine.Square
 import com.example.data.ChessSoundPlayer
 import com.example.data.SoundEffect
+import com.example.data.SoundPack
 import com.example.data.repository.ChessRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 enum class PuzzleStatus {
     SOLVING,
@@ -43,7 +48,12 @@ data class PuzzleUiState(
     val status: PuzzleStatus = PuzzleStatus.SOLVING,
     val ratingDelta: Int? = null,
     val showHintText: Boolean = false,
-    val playerSide: PieceColor = PieceColor.WHITE
+    val playerSide: PieceColor = PieceColor.WHITE,
+    val isDailyStreakMode: Boolean = false,
+    val streakRunCurrent: Int = 0,
+    val streakRunTotal: Int = 0,
+    val streakRunIndex: Int = 0,
+    val streakRunEnded: Boolean = false
 )
 
 class PuzzleViewModel(
@@ -54,19 +64,52 @@ class PuzzleViewModel(
     private val _state = MutableStateFlow(PuzzleUiState())
     val state: StateFlow<PuzzleUiState> = _state.asStateFlow()
 
+    private val _dailySolvedEvents = MutableSharedFlow<Long>(extraBufferCapacity = 4)
+    val dailySolvedEvents: SharedFlow<Long> = _dailySolvedEvents.asSharedFlow()
+
+    private val _streakRunScoreEvents = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+    val streakRunScoreEvents: SharedFlow<Int> = _streakRunScoreEvents.asSharedFlow()
+
     private var soundEnabled = true
     private var hasRecordedAttemptForCurrent = false
+    private var streakQueue: List<ChessPuzzle> = emptyList()
 
     init {
         loadDailyPuzzle()
     }
 
-    fun syncSound(enabled: Boolean) {
+    fun syncSound(
+        enabled: Boolean,
+        volume: Float = 0.85f,
+        pack: SoundPack = SoundPack.CLASSIC_WOOD
+    ) {
         soundEnabled = enabled
+        soundPlayer.configure(volume, pack)
     }
 
     fun loadDailyPuzzle() {
         loadPuzzle(PuzzleLibrary.puzzleForDate(), isDaily = true)
+    }
+
+    fun startDailyStreakRun() {
+        val ladder = PuzzleLibrary.streakLadderForDate()
+        streakQueue = ladder
+        val firstPuzzle = ladder.first()
+        hasRecordedAttemptForCurrent = false
+        val startBoard = ChessBoard.fromFen(firstPuzzle.fen)
+        _state.value = PuzzleUiState(
+            currentPuzzle = firstPuzzle,
+            isDailyChallenge = true,
+            selectedDifficultyFilter = null,
+            board = startBoard,
+            stepIndex = 0,
+            playerSide = startBoard.sideToMove,
+            isDailyStreakMode = true,
+            streakRunCurrent = 0,
+            streakRunTotal = ladder.size,
+            streakRunIndex = 0,
+            streakRunEnded = false
+        )
     }
 
     fun setDifficultyFilter(difficulty: PuzzleDifficulty?) {
@@ -78,12 +121,46 @@ class PuzzleViewModel(
     }
 
     fun nextTrainingPuzzle() {
-        val filter = _state.value.selectedDifficultyFilter
+        val cur = _state.value
+        if (cur.isDailyStreakMode) {
+            if (cur.streakRunEnded) {
+                startDailyStreakRun()
+            } else {
+                advanceStreakPuzzle()
+            }
+            return
+        }
+        val filter = cur.selectedDifficultyFilter
         val pool = if (filter == null) PuzzleLibrary.ALL_PUZZLES
         else PuzzleLibrary.ALL_PUZZLES.filter { it.difficulty == filter }
-        val curIdx = pool.indexOfFirst { it.id == _state.value.currentPuzzle.id }
+        val curIdx = pool.indexOfFirst { it.id == cur.currentPuzzle.id }
         val next = pool[(curIdx + 1) % pool.size]
         loadPuzzle(next, isDaily = false)
+    }
+
+    fun advanceStreakPuzzle() {
+        val cur = _state.value
+        if (!cur.isDailyStreakMode || streakQueue.isEmpty()) {
+            startDailyStreakRun()
+            return
+        }
+        val nextIdx = (cur.streakRunIndex + 1) % streakQueue.size
+        val nextPuzzle = streakQueue[nextIdx]
+        hasRecordedAttemptForCurrent = false
+        val startBoard = ChessBoard.fromFen(nextPuzzle.fen)
+        _state.value = PuzzleUiState(
+            currentPuzzle = nextPuzzle,
+            isDailyChallenge = nextIdx == 0,
+            selectedDifficultyFilter = null,
+            board = startBoard,
+            stepIndex = 0,
+            playerSide = startBoard.sideToMove,
+            isDailyStreakMode = true,
+            streakRunCurrent = cur.streakRunCurrent,
+            streakRunTotal = streakQueue.size,
+            streakRunIndex = nextIdx,
+            streakRunEnded = false
+        )
     }
 
     fun loadPuzzle(puzzle: ChessPuzzle, isDaily: Boolean) {
@@ -95,12 +172,18 @@ class PuzzleViewModel(
             selectedDifficultyFilter = _state.value.selectedDifficultyFilter,
             board = startBoard,
             stepIndex = 0,
-            playerSide = startBoard.sideToMove
+            playerSide = startBoard.sideToMove,
+            isDailyStreakMode = false
         )
     }
 
     fun retryPuzzle() {
-        loadPuzzle(_state.value.currentPuzzle, _state.value.isDailyChallenge)
+        val cur = _state.value
+        if (cur.isDailyStreakMode) {
+            startDailyStreakRun()
+        } else {
+            loadPuzzle(cur.currentPuzzle, cur.isDailyChallenge)
+        }
     }
 
     fun requestHint() {
@@ -121,7 +204,7 @@ class PuzzleViewModel(
 
     fun onSquareTapped(sq: Int) {
         val cur = _state.value
-        if (cur.status == PuzzleStatus.SOLVED) return
+        if (cur.status == PuzzleStatus.SOLVED || cur.streakRunEnded) return
         if (cur.board.sideToMove != cur.playerSide) return
 
         val selected = cur.selectedSquare
@@ -157,15 +240,27 @@ class PuzzleViewModel(
         val cur = _state.value
         val puzzle = cur.currentPuzzle
         val expectedUci = puzzle.solutionUci.getOrNull(cur.stepIndex) ?: return
+        val isCapture = cur.board.pieceAt(move.to) != null || move.isEnPassant
         val nextBoard = cur.board.makeMove(move)
-        val (termRes, _) = nextBoard.evaluateTermination()
+        val isCheck = nextBoard.isInCheck(nextBoard.sideToMove)
+        val (termRes, termReason) = nextBoard.evaluateTermination()
         val isImmediateMate = (termRes == GameResult.WHITE_WIN && cur.playerSide == PieceColor.WHITE) ||
             (termRes == GameResult.BLACK_WIN && cur.playerSide == PieceColor.BLACK)
 
         if (move.toUci() == expectedUci || isImmediateMate) {
-            soundPlayer.play(SoundEffect.MOVE, soundEnabled)
             val nextStep = cur.stepIndex + 1
             val isComplete = isImmediateMate || nextStep >= puzzle.solutionUci.size
+
+            when {
+                isImmediateMate || (isComplete && termReason == com.example.chess.engine.TerminationReason.CHECKMATE) ->
+                    soundPlayer.play(SoundEffect.CHECKMATE, soundEnabled)
+                isComplete -> soundPlayer.play(SoundEffect.PUZZLE_SUCCESS, soundEnabled)
+                isCheck -> soundPlayer.play(SoundEffect.CHECK, soundEnabled)
+                move.isCastling -> soundPlayer.play(SoundEffect.CASTLE, soundEnabled)
+                move.promotion != null -> soundPlayer.play(SoundEffect.PROMOTE, soundEnabled)
+                isCapture -> soundPlayer.play(SoundEffect.CAPTURE, soundEnabled)
+                else -> soundPlayer.play(SoundEffect.MOVE, soundEnabled)
+            }
 
             _state.update {
                 it.copy(
@@ -182,7 +277,7 @@ class PuzzleViewModel(
             }
 
             if (isComplete) {
-                onPuzzleSolved()
+                onPuzzleSolved(skipSound = true)
             } else {
                 // Play forced opponent reply automatically
                 viewModelScope.launch {
@@ -191,8 +286,14 @@ class PuzzleViewModel(
                     val replyUci = puzzle.solutionUci.getOrNull(afterWait.stepIndex) ?: return@launch
                     val replyMove = afterWait.board.generateLegalMoves().firstOrNull { it.toUci() == replyUci }
                     if (replyMove != null) {
+                        val replyCapture = afterWait.board.pieceAt(replyMove.to) != null || replyMove.isEnPassant
                         val b2 = afterWait.board.makeMove(replyMove)
-                        soundPlayer.play(SoundEffect.MOVE, soundEnabled)
+                        val replyCheck = b2.isInCheck(b2.sideToMove)
+                        when {
+                            replyCheck -> soundPlayer.play(SoundEffect.CHECK, soundEnabled)
+                            replyCapture -> soundPlayer.play(SoundEffect.CAPTURE, soundEnabled)
+                            else -> soundPlayer.play(SoundEffect.OPPONENT_MOVE, soundEnabled)
+                        }
                         _state.update {
                             it.copy(
                                 board = b2,
@@ -210,7 +311,8 @@ class PuzzleViewModel(
                 it.copy(
                     selectedSquare = null,
                     legalMovesForSelected = emptyList(),
-                    status = PuzzleStatus.WRONG_TRY
+                    status = PuzzleStatus.WRONG_TRY,
+                    streakRunEnded = it.isDailyStreakMode
                 )
             }
             if (!hasRecordedAttemptForCurrent) {
@@ -231,9 +333,19 @@ class PuzzleViewModel(
         }
     }
 
-    private fun onPuzzleSolved() {
-        soundPlayer.play(SoundEffect.PUZZLE_SUCCESS, soundEnabled)
+    private fun onPuzzleSolved(skipSound: Boolean = false) {
+        if (!skipSound) {
+            soundPlayer.play(SoundEffect.PUZZLE_SUCCESS, soundEnabled)
+        }
         val cur = _state.value
+        if (cur.isDailyChallenge) {
+            _dailySolvedEvents.tryEmit(LocalDate.now().toEpochDay())
+        }
+        if (cur.isDailyStreakMode) {
+            val newStreakScore = cur.streakRunCurrent + 1
+            _state.update { it.copy(streakRunCurrent = newStreakScore) }
+            _streakRunScoreEvents.tryEmit(newStreakScore)
+        }
         if (!hasRecordedAttemptForCurrent) {
             hasRecordedAttemptForCurrent = true
             viewModelScope.launch {

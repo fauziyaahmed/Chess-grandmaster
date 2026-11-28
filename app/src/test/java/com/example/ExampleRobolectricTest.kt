@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.chess.engine.Chess960
@@ -23,6 +24,7 @@ import com.example.data.repository.ChessRepository
 import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.GrandmasterTheme
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -191,6 +193,10 @@ class ExampleRobolectricTest {
         composeRule.onNodeWithTag("home_list").performScrollToNode(hasTestTag("home_open_theme_studio_btn"))
         composeRule.onNodeWithTag("home_open_theme_studio_btn").assertIsDisplayed()
         composeRule.onNodeWithTag("home_compare_themes_btn").assertIsDisplayed()
+        composeRule.onNodeWithTag("home_list").performScrollToNode(hasTestTag("mode_bluetooth_friend"))
+        composeRule.onNodeWithTag("mode_bluetooth_friend").assertIsDisplayed()
+        composeRule.onNodeWithTag("home_list").performScrollToNode(hasTestTag("mode_endgame_trainer"))
+        composeRule.onNodeWithTag("mode_endgame_trainer").assertIsDisplayed()
         composeRule.onNodeWithTag("home_list").performScrollToNode(hasTestTag("mode_fischer960"))
         composeRule.onNodeWithTag("mode_fischer960").assertIsDisplayed()
         composeRule.onNodeWithTag("home_list").performScrollToNode(hasTestTag("home_daily_puzzle_card"))
@@ -265,6 +271,7 @@ class ExampleRobolectricTest {
                     initialTab = 0,
                     onSelectAppTheme = {},
                     onSelectBoardTheme = {},
+                    onSelectBoardPattern = {},
                     onSelectPieceStyle = {},
                     onSelectBackgroundPreset = {},
                     onUpdateCustomGradient = { _, _ -> },
@@ -279,9 +286,12 @@ class ExampleRobolectricTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("app_theme_card_GRANDMASTER_EMERALD").assertIsDisplayed()
         composeRule.onNodeWithTag("pick_custom_bg_btn").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("board_pattern_row").performScrollTo()
+        composeRule.onNodeWithTag("board_pattern_row").performScrollToNode(hasTestTag("board_pattern_chip_TOURNAMENT_BORDER"))
+        composeRule.onNodeWithTag("board_pattern_chip_TOURNAMENT_BORDER").assertIsDisplayed()
 
         // Switch to Compare With Others tab
-        composeRule.onNodeWithTag("theme_compare_tab").performClick()
+        composeRule.onNodeWithTag("theme_compare_tab").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("compare_arena_row").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("apply_compare_b_btn").performScrollTo().performClick()
@@ -289,10 +299,11 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `theme options boards backgrounds and community comparison presets are valid`() {
+    fun `theme options 16 boards 4 patterns 8 piece sets and comparison presets are valid`() {
         assertEquals(6, com.example.ui.theme.AppThemeOption.entries.size)
-        assertEquals(8, com.example.ui.theme.BoardTheme.entries.size)
-        assertEquals(4, com.example.ui.theme.PieceStyle.entries.size)
+        assertEquals(16, com.example.ui.theme.BoardTheme.entries.size)
+        assertEquals(4, com.example.ui.theme.BoardPatternStyle.entries.size)
+        assertEquals(8, com.example.ui.theme.PieceStyle.entries.size)
         assertEquals(10, com.example.ui.theme.ArenaBackgroundPreset.entries.size)
         assertTrue(com.example.ui.theme.COMMUNITY_THEME_PRESETS.size >= 5)
 
@@ -304,14 +315,71 @@ class ExampleRobolectricTest {
 
         val settings = com.example.data.preferences.UserSettings(
             appTheme = com.example.ui.theme.AppThemeOption.CRIMSON_GRAND_PRIX,
-            boardTheme = com.example.ui.theme.BoardTheme.TOURNAMENT_CRIMSON,
-            pieceStyle = com.example.ui.theme.PieceStyle.TOURNAMENT_CRYSTAL,
+            boardTheme = com.example.ui.theme.BoardTheme.ROSEWOOD_GOLD,
+            boardPattern = com.example.ui.theme.BoardPatternStyle.TOURNAMENT_BORDER,
+            pieceStyle = com.example.ui.theme.PieceStyle.OBSIDIAN_PEARL,
             backgroundPreset = com.example.ui.theme.ArenaBackgroundPreset.COSMIC_NEBULA
         )
         val setup = settings.toComparisonSetup("AlexGM", 1850)
         assertEquals("AlexGM", setup.authorLabel)
         assertEquals(com.example.ui.theme.AppThemeOption.CRIMSON_GRAND_PRIX, setup.appTheme)
         assertEquals(com.example.ui.theme.ArenaBackgroundPreset.COSMIC_NEBULA, setup.backgroundPreset)
+    }
+
+    @Test
+    fun `conditional move executes automatically and match rating updates on finish`() = runBlocking {
+        repository.ensureSeeded()
+        val vm = com.example.ui.viewmodel.GameViewModel(repository, com.example.data.ChessSoundPlayer())
+
+        // Start a Pass & Play conditional-testable match OR Bluetooth-style fixed white match
+        vm.startNewGame(
+            com.example.ui.viewmodel.GameSetupConfig(
+                opponentMode = com.example.ui.viewmodel.PlayOpponentMode.BLUETOOTH_FRIEND,
+                chosenColor = PieceColor.WHITE,
+                isRated = true
+            )
+        )
+        repeat(40) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(25))
+            val s = vm.state.value
+            if (s.config.opponentMode == com.example.ui.viewmodel.PlayOpponentMode.BLUETOOTH_FRIEND && s.preMatchStakes != null) {
+                return@repeat
+            }
+            Thread.sleep(15)
+        }
+        assertEquals(com.example.ui.viewmodel.PlayOpponentMode.BLUETOOTH_FRIEND, vm.state.value.config.opponentMode)
+        assertNotNull("Rated match should display pre-match Elo stakes", vm.state.value.preMatchStakes)
+
+        // Play White 1.e4 & arm conditional: If Black plays e7e5 (e5) -> Auto-play g1f3 (Nf3)
+        vm.playMoveWithConditional(
+            myMoveUci = "e2e4",
+            expectedOpponentUci = "e7e5",
+            expectedOpponentSan = "e5",
+            responseUci = "g1f3",
+            responseSan = "Nf3"
+        )
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(listOf("e4"), vm.state.value.sanHistory)
+        assertEquals(1, vm.state.value.conditionalMoves.size)
+
+        // Simulate Black playing e7e5 over Bluetooth and verify Nf3 auto-executes conditionally
+        vm.onIncomingBluetoothPacketForTest(com.example.data.bluetooth.BtPacket.MoveSync("e7e5", 599_000L, 598_000L))
+        repeat(20) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(40))
+            if (vm.state.value.sanHistory.size >= 3) return@repeat
+            Thread.sleep(15)
+        }
+        assertEquals(listOf("e4", "e5", "Nf3"), vm.state.value.sanHistory)
+        assertTrue(vm.state.value.conditionalMoves.isEmpty())
+
+        vm.resign()
+        repeat(40) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(30))
+            if (vm.state.value.whiteRatingDelta != null && vm.state.value.postGamePerfRating != null) return@repeat
+            Thread.sleep(20)
+        }
+        assertTrue("Resignation loss should compute negative whiteRatingDelta", (vm.state.value.whiteRatingDelta ?: 0) < 0)
+        assertNotNull("Post-game performance rating should be calculated", vm.state.value.postGamePerfRating)
     }
 
     @Test
@@ -324,5 +392,377 @@ class ExampleRobolectricTest {
         val activity = controller.get()
         assertNotNull(activity)
         controller.pause().stop().destroy()
+    }
+
+    @Test
+    fun `endgame trainer screen renders categories drills and checkmate completes with 3 stars`() {
+        val vm = com.example.ui.viewmodel.EndgameViewModel(com.example.data.ChessSoundPlayer())
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.EndgameScreen(
+                    endgameViewModel = vm,
+                    settings = com.example.data.preferences.UserSettings()
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("endgame_trainer_list").assertIsDisplayed()
+        composeRule.onNodeWithTag("endgame_cat_BASIC_MATES").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("endgame_trainer_list").performScrollToNode(hasTestTag("endgame_box_toggle_btn"))
+        composeRule.onNodeWithTag("endgame_box_toggle_btn").assertIsDisplayed()
+
+        // Load K+Q vs K corner edge drill ("3k4/8/3K4/8/2Q5/8/8/8 w - - 0 1") and deliver Qg8# checkmate!
+        val cornerDrill = com.example.chess.engine.EndgameLibrary.ALL_DRILLS.first { it.id == "eg_kq_corner" }
+        vm.loadDrill(cornerDrill)
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("endgame_trainer_list").performScrollToNode(hasTestTag("square_c4"))
+        composeRule.onNodeWithTag("square_c4").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("endgame_trainer_list").performScrollToNode(hasTestTag("square_g8"))
+        composeRule.onNodeWithTag("square_g8").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(com.example.ui.viewmodel.EndgameStatus.CHECKMATED_WIN, vm.state.value.status)
+        assertEquals(3, vm.state.value.earnedStars)
+        composeRule.onNodeWithTag("endgame_trainer_list").performScrollToNode(hasTestTag("endgame_win_card"))
+        composeRule.onNodeWithTag("endgame_win_card").assertIsDisplayed()
+    }
+
+    @Test
+    fun `sound effect manager triggers distinct audio clips for move capture and checkmate`() = runBlocking {
+        repository.ensureSeeded()
+        val soundMgr = com.example.data.SoundEffectManager()
+        soundMgr.attachContext(context)
+        val vm = com.example.ui.viewmodel.GameViewModel(repository, soundMgr)
+        vm.syncPreferences(
+            sound = true,
+            autoQueen = true,
+            voiceEnabled = false,
+            volume = 0.9f,
+            pack = com.example.data.SoundPack.CRYSTAL_GLASS
+        )
+        vm.startNewGame(
+            com.example.ui.viewmodel.GameSetupConfig(
+                opponentMode = com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY,
+                isRated = false
+            )
+        )
+        repeat(30) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(20))
+            if (vm.state.value.config.opponentMode == com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY) return@repeat
+            Thread.sleep(10)
+        }
+        soundMgr.clearRecordedEvents()
+
+        fun playSquares(fromAlg: String, toAlg: String) {
+            vm.onSquareTapped(com.example.chess.engine.Square.fromAlgebraic(fromAlg))
+            vm.onSquareTapped(com.example.chess.engine.Square.fromAlgebraic(toAlg))
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        }
+
+        // 1. e4 e5 2. d4 exd4 (CAPTURE) 3. Bc4 Nc6 4. Qh5 Nf6 5. Qxf7# (CHECKMATE)
+        playSquares("e2", "e4")
+        playSquares("e7", "e5")
+        playSquares("d2", "d4")
+        playSquares("e5", "d4")
+        playSquares("f1", "c4")
+        playSquares("b8", "c6")
+        playSquares("d1", "h5")
+        playSquares("g8", "f6")
+        playSquares("h5", "f7")
+
+        assertEquals(GameResult.WHITE_WIN, vm.state.value.result)
+        val events = soundMgr.recentEvents.value
+        assertTrue("Expected MOVE clip in $events", events.contains(com.example.data.SoundEffect.MOVE))
+        assertTrue("Expected CAPTURE clip in $events", events.contains(com.example.data.SoundEffect.CAPTURE))
+        assertEquals(
+            "Checkmate must trigger CHECKMATE without overlapping GAME_END",
+            com.example.data.SoundEffect.CHECKMATE,
+            events.lastOrNull()
+        )
+        assertEquals(1, events.count { it == com.example.data.SoundEffect.CHECKMATE })
+        soundMgr.release()
+    }
+
+    @Test
+    fun `move history list displays algebraic notation and tapping moves navigates game state`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val vm = com.example.ui.viewmodel.GameViewModel(repository, com.example.data.SoundEffectManager())
+        vm.startNewGame(
+            com.example.ui.viewmodel.GameSetupConfig(
+                opponentMode = com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY,
+                isRated = false
+            )
+        )
+        repeat(30) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(20))
+            if (vm.state.value.config.opponentMode == com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY) return@repeat
+            Thread.sleep(10)
+        }
+
+        fun playSquares(fromAlg: String, toAlg: String) {
+            vm.onSquareTapped(com.example.chess.engine.Square.fromAlgebraic(fromAlg))
+            vm.onSquareTapped(com.example.chess.engine.Square.fromAlgebraic(toAlg))
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        }
+
+        playSquares("e2", "e4")
+        playSquares("e7", "e5")
+        playSquares("g1", "f3")
+        assertEquals(listOf("e4", "e5", "Nf3"), vm.state.value.sanHistory)
+
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.PlayScreen(
+                    gameViewModel = vm,
+                    settings = com.example.data.preferences.UserSettings(),
+                    onAnalyzeMatch = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("move_history_card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("move_ply_1").assertIsDisplayed()
+        composeRule.onNodeWithTag("move_ply_2").assertIsDisplayed()
+        composeRule.onNodeWithTag("move_ply_3").assertIsDisplayed()
+
+        // Tap ply 1 (e4): board rewinds to after 1. e4
+        composeRule.onNodeWithTag("move_ply_1").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, vm.state.value.displayedPly)
+        assertTrue(vm.state.value.isReviewingHistory)
+        assertNotNull(vm.state.value.displayedBoard.pieceAt(com.example.chess.engine.Square.fromAlgebraic("e4")))
+        assertEquals(null, vm.state.value.displayedBoard.pieceAt(com.example.chess.engine.Square.fromAlgebraic("f3")))
+        composeRule.onNodeWithTag("move_history_live_btn").assertIsDisplayed()
+
+        // Tap ply 2 (e5): board advances to after 1... e5
+        composeRule.onNodeWithTag("move_ply_2").performClick()
+        composeRule.waitForIdle()
+        assertEquals(2, vm.state.value.displayedPly)
+        assertNotNull(vm.state.value.displayedBoard.pieceAt(com.example.chess.engine.Square.fromAlgebraic("e5")))
+
+        // Tap Start (ply 0): initial board
+        composeRule.onNodeWithTag("move_ply_0").performClick()
+        composeRule.waitForIdle()
+        assertEquals(0, vm.state.value.displayedPly)
+        assertEquals(ChessBoard.STANDARD_FEN, vm.state.value.displayedBoard.toFen())
+
+        // Tap Live button: snaps back to latest state after 2. Nf3
+        composeRule.onNodeWithTag("move_history_live_btn").performClick()
+        composeRule.waitForIdle()
+        assertEquals(3, vm.state.value.displayedPly)
+        assertTrue(!vm.state.value.isReviewingHistory)
+        assertNotNull(vm.state.value.displayedBoard.pieceAt(com.example.chess.engine.Square.fromAlgebraic("f3")))
+
+        // Expand into 2-column algebraic scoresheet view
+        composeRule.onNodeWithTag("move_history_expand_btn").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("move_history_scoresheet").assertIsDisplayed()
+    }
+
+    @Test
+    fun `opening explorer displays master moves in analysis mode and tapping plays move`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val analysisVm = com.example.ui.viewmodel.AnalysisViewModel(repository)
+
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.AnalyzeScreen(
+                    analysisViewModel = analysisVm,
+                    settings = com.example.data.preferences.UserSettings()
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("analyze_list")
+            .performScrollToNode(hasTestTag("opening_explorer_card"))
+        composeRule.onNodeWithTag("opening_explorer_card").assertIsDisplayed()
+        composeRule.onNodeWithTag("explorer_move_e4").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("explorer_move_d4").performScrollTo().assertIsDisplayed()
+
+        // Tap 1. e4 in Opening Explorer -> updates board and refreshes replies (c5, e5, e6, c6)
+        composeRule.onNodeWithTag("explorer_move_e4").performScrollTo().performClick()
+        composeRule.waitForIdle()
+
+        assertEquals(listOf("e4"), analysisVm.state.value.sanMoves)
+        assertEquals(1, analysisVm.state.value.currentPly)
+        val replies = analysisVm.state.value.explorerPosition?.moves?.map { it.san }.orEmpty()
+        assertTrue("Expected Sicilian c5 and e5 after 1. e4, got $replies", replies.containsAll(listOf("c5", "e5")))
+        composeRule.onNodeWithTag("explorer_move_c5").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `daily puzzle streak card launches streak run and increments score when solved`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val puzzleVm = com.example.ui.viewmodel.PuzzleViewModel(repository, com.example.data.SoundEffectManager())
+        val solvedEpochs = mutableListOf<Long>()
+        val streakScores = mutableListOf<Int>()
+        val dailyJob = launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            puzzleVm.dailySolvedEvents.collect { solvedEpochs.add(it) }
+        }
+        val scoreJob = launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            puzzleVm.streakRunScoreEvents.collect { streakScores.add(it) }
+        }
+
+        try {
+            composeRule.setContent {
+                GrandmasterTheme(darkTheme = true) {
+                    com.example.ui.screens.PuzzlesScreen(
+                        puzzleViewModel = puzzleVm,
+                        profile = PlayerProfileEntity(),
+                        attempts = emptyList(),
+                        clubMembers = emptyList(),
+                        settings = com.example.data.preferences.UserSettings()
+                    )
+                }
+            }
+            composeRule.waitForIdle()
+
+            composeRule.onNodeWithTag("daily_puzzle_streak_card").assertIsDisplayed()
+            composeRule.onNodeWithTag("daily_streak_7day_strip").assertIsDisplayed()
+            composeRule.onNodeWithTag("puzzle_daily_streak_btn").performClick()
+            composeRule.waitForIdle()
+
+            assertTrue(puzzleVm.state.value.isDailyStreakMode)
+            composeRule.onNodeWithTag("puzzles_tactics_list")
+                .performScrollToNode(hasTestTag("daily_streak_active_banner"))
+            composeRule.onNodeWithTag("daily_streak_active_banner").assertIsDisplayed()
+
+            // Play out solution steps of the active streak puzzle (deterministic mate/tactic)
+            var guard = 0
+            while (puzzleVm.state.value.status != com.example.ui.viewmodel.PuzzleStatus.SOLVED && guard++ < 12) {
+                val st = puzzleVm.state.value
+                if (st.board.sideToMove == st.playerSide) {
+                    val nextUci = st.currentPuzzle.solutionUci[st.stepIndex]
+                    val fromSq = com.example.chess.engine.Square.fromAlgebraic(nextUci.substring(0, 2))
+                    val toSq = com.example.chess.engine.Square.fromAlgebraic(nextUci.substring(2, 4))
+                    puzzleVm.onSquareTapped(fromSq)
+                    puzzleVm.onSquareTapped(toSq)
+                }
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(450))
+            }
+            composeRule.waitForIdle()
+
+            assertEquals(com.example.ui.viewmodel.PuzzleStatus.SOLVED, puzzleVm.state.value.status)
+            assertEquals(1, puzzleVm.state.value.streakRunCurrent)
+            assertTrue("Expected daily solved epoch emitted", solvedEpochs.isNotEmpty())
+            assertEquals(listOf(1), streakScores)
+        } finally {
+            dailyJob.cancel()
+            scoreJob.cancel()
+        }
+    }
+
+    @Test
+    fun `logical graphs render radar color outcomes and progression in profile dashboard`() {
+        val dataStore = com.example.data.preferences.SettingsDataStore(context)
+        val mainVm = com.example.ui.viewmodel.MainViewModel(repository, dataStore)
+        mainVm.openProfileTab(0)
+        val profile = PlayerProfileEntity(
+            username = "GraphGM",
+            rapidRating = 1540,
+            blitzRating = 1490,
+            puzzleRating = 1620,
+            longestWinStreak = 5
+        )
+        val snapshots = listOf(
+            com.example.data.local.RatingSnapshotEntity(formatKey = "RAPID", rating = 1450),
+            com.example.data.local.RatingSnapshotEntity(formatKey = "RAPID", rating = 1540)
+        )
+        val sampleMatches = listOf(
+            com.example.data.local.MatchHistoryEntity(
+                whiteName = "GraphGM", blackName = "Engine",
+                whiteRatingBefore = 1500, whiteRatingAfter = 1540,
+                blackRatingBefore = 1500, blackRatingAfter = 1460,
+                playerSide = "WHITE", variant = "STANDARD", category = "RAPID",
+                timeControlLabel = "10+0", chess960Position = 518,
+                result = "WHITE_WIN", termination = "Checkmate",
+                openingEco = "C50", openingName = "Italian",
+                movesSanCsv = "e4,e5", startFen = ChessBoard.STANDARD_FEN, finalFen = ChessBoard.STANDARD_FEN,
+                moveCount = 30, durationSeconds = 250, accuracyPercent = 91.0, pgnText = ""
+            )
+        )
+
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.ProfileScreen(
+                    mainViewModel = mainVm,
+                    profile = profile,
+                    matches = sampleMatches,
+                    ratingSnapshots = snapshots,
+                    achievements = emptyList(),
+                    settings = com.example.data.preferences.UserSettings(dailyPuzzleStreak = 2),
+                    onOpenMatchAnalysis = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("profile_dashboard_list")
+            .performScrollToNode(hasTestTag("logical_progression_graph"))
+        composeRule.onNodeWithTag("logical_progression_graph").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("profile_dashboard_list")
+            .performScrollToNode(hasTestTag("logical_radar_graph"))
+        composeRule.onNodeWithTag("logical_radar_graph").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("profile_dashboard_list")
+            .performScrollToNode(hasTestTag("logical_color_outcome_graph"))
+        composeRule.onNodeWithTag("logical_color_outcome_graph").assertIsDisplayed()
+    }
+
+    @Test
+    fun `blind audio chess mode plays spoken moves via piece selector and command bar`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val vm = com.example.ui.viewmodel.GameViewModel(repository, com.example.data.SoundEffectManager())
+        vm.startNewGame(
+            com.example.ui.viewmodel.GameSetupConfig(
+                opponentMode = com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY,
+                isBlindMode = true
+            )
+        )
+        repeat(60) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            if (vm.state.value.config.isBlindMode &&
+                vm.state.value.config.opponentMode == com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY
+            ) return@repeat
+            Thread.sleep(10)
+        }
+
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.PlayScreen(
+                    gameViewModel = vm,
+                    settings = com.example.data.preferences.UserSettings(),
+                    onAnalyzeMatch = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("blind_chess_panel").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("blind_spoken_banner").assertIsDisplayed()
+
+        // Step 1 & 2: Play 1. e4 through accessible piece selector & legal move buttons
+        composeRule.onNodeWithTag("blind_piece_e2").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("blind_move_e2e4").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf("e4"), vm.state.value.sanHistory)
+
+        // Spoken/Typed natural command for Black reply 1... c5
+        composeRule.onNodeWithTag("blind_move_input").performScrollTo().performTextInput("c5")
+        composeRule.onNodeWithTag("blind_voice_submit_btn").performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf("e4", "c5"), vm.state.value.sanHistory)
+
+        // Toggle Blindfold hide pieces switch
+        composeRule.onNodeWithTag("blind_hide_pieces_toggle").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(vm.state.value.blindfoldHidePieces)
     }
 }

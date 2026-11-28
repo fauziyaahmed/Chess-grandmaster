@@ -31,7 +31,11 @@ fun ChessPieceIcon(
             val (fillPrimary, fillSecondary, strokeColor, detailColor) = piecePalette(piece.color, style)
             val w = size.width
             val h = size.height
-            val strokeWidth = (w * 0.045f).coerceAtLeast(1.2f)
+            val strokeWidth = when (style) {
+                PieceStyle.MINIMALIST_MODERN -> (w * 0.06f).coerceAtLeast(1.5f)
+                PieceStyle.CYBER_NEON -> (w * 0.055f).coerceAtLeast(1.4f)
+                else -> (w * 0.045f).coerceAtLeast(1.2f)
+            }
 
             val fillBrush = Brush.linearGradient(
                 colors = listOf(fillPrimary, fillSecondary),
@@ -78,6 +82,26 @@ private fun piecePalette(color: PieceColor, style: PieceStyle): PieceColors = wh
         PieceColors(Color(0xFFECFEFF), Color(0xFFA5F3FC), Color(0xFF0E7490), Color(0xFF06B6D4))
     } else {
         PieceColors(Color(0xFF4C1D95), Color(0xFF1E1B4B), Color(0xFFE9D5FF), Color(0xFFC084FC))
+    }
+    PieceStyle.ROSEWOOD_MAPLE -> if (color == PieceColor.WHITE) {
+        PieceColors(Color(0xFFFFF8EB), Color(0xFFEBD3AD), Color(0xFF5C3A21), Color(0xFF8C5A34))
+    } else {
+        PieceColors(Color(0xFF6D2927), Color(0xFF3D1312), Color(0xFFF3D5B5), Color(0xFFD9A066))
+    }
+    PieceStyle.CYBER_NEON -> if (color == PieceColor.WHITE) {
+        PieceColors(Color(0xFF0F172A), Color(0xFF164E63), Color(0xFF22D3EE), Color(0xFF67E8F9))
+    } else {
+        PieceColors(Color(0xFF1F091A), Color(0xFF4C0519), Color(0xFFF43F5E), Color(0xFFFB7185))
+    }
+    PieceStyle.OBSIDIAN_PEARL -> if (color == PieceColor.WHITE) {
+        PieceColors(Color(0xFFFFFFFF), Color(0xFFD4D4D8), Color(0xFF18181B), Color(0xFF52525B))
+    } else {
+        PieceColors(Color(0xFF18181B), Color(0xFF09090B), Color(0xFFFAFAFA), Color(0xFFA1A1AA))
+    }
+    PieceStyle.MINIMALIST_MODERN -> if (color == PieceColor.WHITE) {
+        PieceColors(Color(0xFFFEFCE8), Color(0xFFFEF08A), Color(0xFF1C1917), Color(0xFF1C1917))
+    } else {
+        PieceColors(Color(0xFF292524), Color(0xFF1C1917), Color(0xFFFEF08A), Color(0xFFFACC15))
     }
 }
 

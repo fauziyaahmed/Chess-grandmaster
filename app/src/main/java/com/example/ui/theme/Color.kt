@@ -169,14 +169,89 @@ enum class BoardTheme(
         Color(0x663B82F6),
         Color(0x8806B6D4),
         Color(0x99F59E0B)
+    ),
+    ROSEWOOD_GOLD(
+        "Rosewood Gold",
+        Color(0xFFF5E6D3),
+        Color(0xFF6B2D2B),
+        Color(0x66F59E0B),
+        Color(0x88FBBF24),
+        Color(0x9910B981)
+    ),
+    SAKURA_BLOSSOM(
+        "Sakura Blossom",
+        Color(0xFFFFF1F5),
+        Color(0xFF9D4E6E),
+        Color(0x66EC4899),
+        Color(0x88F472B6),
+        Color(0x996366F1)
+    ),
+    CYBER_NEON_MATRIX(
+        "Cyber Neon",
+        Color(0xFF1E293B),
+        Color(0xFF0B1120),
+        Color(0x6622D3EE),
+        Color(0x8806B6D4),
+        Color(0x99F43F5E)
+    ),
+    NORDIC_BIRCH(
+        "Nordic Birch",
+        Color(0xFFF6EFE2),
+        Color(0xFFA68B6B),
+        Color(0x660284C7),
+        Color(0x880D9488),
+        Color(0x99F59E0B)
+    ),
+    AMETHYST_DUSK(
+        "Amethyst Dusk",
+        Color(0xFFF3E8FF),
+        Color(0xFF5B3A82),
+        Color(0x66A855F7),
+        Color(0x88C084FC),
+        Color(0x9922D3EE)
+    ),
+    DESERT_SANDSTONE(
+        "Desert Sandstone",
+        Color(0xFFF7EAD9),
+        Color(0xFFB46B3D),
+        Color(0x66F59E0B),
+        Color(0x88EA580C),
+        Color(0x990284C7)
+    ),
+    OCEAN_CORAL(
+        "Ocean Coral",
+        Color(0xFFECFEFF),
+        Color(0xFF16697A),
+        Color(0x6606B6D4),
+        Color(0x882DD4BF),
+        Color(0x99F97316)
+    ),
+    CARBON_MONOCHROME(
+        "Carbon Platinum",
+        Color(0xFFE5E7EB),
+        Color(0xFF27272A),
+        Color(0x6610B981),
+        Color(0x883B82F6),
+        Color(0x99F59E0B)
     )
+}
+
+enum class BoardPatternStyle(val displayName: String) {
+    CLASSIC_FLAT("Clean Flat"),
+    WOOD_BEVEL("Beveled Frame"),
+    TOURNAMENT_BORDER("Gold Rim"),
+    NEON_GRID("Neon Edge Grid")
 }
 
 enum class PieceStyle(val displayName: String) {
     CLASSIC_STAUNTON("Classic Staunton"),
     NEO_GEOMETRIC("Neo Geometric"),
     ROYAL_GOLD("Royal Gold & Ivory"),
-    TOURNAMENT_CRYSTAL("Crystal Glass")
+    TOURNAMENT_CRYSTAL("Crystal Glass"),
+    ROSEWOOD_MAPLE("Rosewood & Maple"),
+    CYBER_NEON("Cyber Neon"),
+    OBSIDIAN_PEARL("Obsidian & Pearl"),
+    MINIMALIST_MODERN("Minimalist Bold")
 }
 
 enum class ArenaBackgroundPreset(
