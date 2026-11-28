@@ -8,12 +8,15 @@ import com.example.chess.coach.CoachRepository
 import com.example.chess.coach.CoachVoiceEngine
 import com.example.chess.coach.EngineCoachDavidRepository
 import com.example.chess.coach.VoiceMoveParser
+import com.example.chess.engine.AnalyzedMove
 import com.example.chess.engine.Chess960
 import com.example.chess.engine.ChessBoard
 import com.example.chess.engine.ChessEngine
+import com.example.chess.engine.EngineEvaluation
 import com.example.chess.engine.GameResult
 import com.example.chess.engine.GameVariant
 import com.example.chess.engine.Move
+import com.example.chess.engine.MoveClassification
 import com.example.chess.engine.OpeningBook
 import com.example.chess.engine.PieceColor
 import com.example.chess.engine.PieceType
@@ -153,7 +156,12 @@ data class ActiveGameState(
     val isVoiceSpeaking: Boolean = false,
     val blindfoldHidePieces: Boolean = false,
     val blindAnnouncement: String = "",
-    val blindSpeechRate: Float = 1.0f
+    val blindSpeechRate: Float = 1.0f,
+    // Live In-Game Analysis
+    val isLiveAnalysisEnabled: Boolean = false,
+    val isLiveEvalRunning: Boolean = false,
+    val liveEval: EngineEvaluation? = null,
+    val liveAnalyzedMoves: List<AnalyzedMove> = emptyList()
 ) {
     val displayedPly: Int
         get() = (reviewPly ?: sanHistory.size).coerceIn(0, (boardHistory.size - 1).coerceAtLeast(0))
@@ -188,6 +196,7 @@ class GameViewModel(
     private var clockJob: Job? = null
     private var aiJob: Job? = null
     private var coachJob: Job? = null
+    private var liveEvalJob: Job? = null
     private var conditionalJob: Job? = null
     private var btObserverJob: Job? = null
     private var voiceObserverJob: Job? = null
@@ -279,6 +288,7 @@ class GameViewModel(
         clockJob?.cancel()
         aiJob?.cancel()
         coachJob?.cancel()
+        liveEvalJob?.cancel()
         conditionalJob?.cancel()
         startGameJob?.cancel()
         lowTimeAlertedWhite = false
@@ -417,6 +427,9 @@ class GameViewModel(
                     postGamePerfRating = null,
                     conditionalMoves = emptyList(),
                     conditionalStatusNotice = null,
+                    isLiveEvalRunning = false,
+                    liveEval = null,
+                    liveAnalyzedMoves = emptyList(),
                     blindfoldHidePieces = false,
                     blindAnnouncement = if (config.isBlindMode) {
                         val sideLabel = if (humanSide == PieceColor.BLACK) "Black" else "White"
@@ -732,6 +745,10 @@ class GameViewModel(
         val wasHumanMove = cur.playerSide == null || boardBefore.sideToMove == cur.playerSide
         if (cur.config.coachDavidEnabled && wasHumanMove && !cur.config.isBlindMode) {
             triggerCoachMoveFeedback(boardBefore, nextBoard, move, san, newSanHistory, cur.playerSide)
+        }
+
+        if (_state.value.isLiveAnalysisEnabled) {
+            triggerLiveAnalysisUpdate(boardBefore, nextBoard, san, newSanHistory.size)
         }
 
         if (termResult != GameResult.IN_PROGRESS) {
@@ -1302,7 +1319,9 @@ class GameViewModel(
     fun offerDraw() {
         val cur = _state.value
         if (cur.result != GameResult.IN_PROGRESS) return
-        if (cur.config.opponentMode == PlayOpponentMode.PASS_AND_PLAY) {
+        if (cur.config.opponentMode == PlayOpponentMode.PASS_AND_PLAY ||
+            cur.config.opponentMode == PlayOpponentMode.SPECTATOR
+        ) {
             finishGame(GameResult.DRAW, TerminationReason.AGREED_DRAW)
             return
         }
@@ -1311,22 +1330,26 @@ class GameViewModel(
             _state.update { it.copy(statusMessage = "Draw offer sent to friend...") }
             return
         }
-        if (cur.config.opponentMode == PlayOpponentMode.VS_AI) {
-            viewModelScope.launch {
-                val eval = withContext(Dispatchers.Default) {
-                    engine.analyzePosition(cur.board, maxDepth = 3, timeLimitMs = 250L)
-                }
-                val aiIsWhite = cur.playerSide == PieceColor.BLACK
-                val aiAdvantageCp = if (aiIsWhite) eval.centipawnsWhite else -eval.centipawnsWhite
-                if (aiAdvantageCp <= 60 && cur.sanHistory.size >= 10) {
-                    finishGame(GameResult.DRAW, TerminationReason.AGREED_DRAW)
+        viewModelScope.launch {
+            val eval = withContext(Dispatchers.Default) {
+                engine.analyzePosition(cur.board, maxDepth = 3, timeLimitMs = 220L)
+            }
+            val aiIsWhite = cur.playerSide == PieceColor.BLACK
+            val aiAdvantageCp = if (aiIsWhite) eval.centipawnsWhite else -eval.centipawnsWhite
+            if (aiAdvantageCp <= 75 && cur.sanHistory.size >= 6) {
+                finishGame(GameResult.DRAW, TerminationReason.AGREED_DRAW)
+            } else {
+                val msg = if (cur.sanHistory.size < 6) {
+                    "Play at least 3 moves each before AI considers a draw"
                 } else {
-                    _state.update {
-                        it.copy(
-                            statusMessage = "Engine declined draw offer",
-                            chatMessages = it.chatMessages + ChatMessage(cur.blackName, "Draw declined — let's play on!", isSelf = false)
-                        )
-                    }
+                    val advPawns = aiAdvantageCp / 100.0
+                    "Engine declined draw (AI ahead ${if (advPawns >= 0) "+" else ""}${"%.1f".format(advPawns)})"
+                }
+                _state.update {
+                    it.copy(
+                        statusMessage = msg,
+                        chatMessages = it.chatMessages + ChatMessage(cur.blackName, msg, isSelf = false)
+                    )
                 }
             }
         }
@@ -1337,6 +1360,10 @@ class GameViewModel(
         if (cur.result != GameResult.IN_PROGRESS) return
         if (cur.config.opponentMode == PlayOpponentMode.TOURNAMENT || cur.config.opponentMode == PlayOpponentMode.BLUETOOTH_FRIEND) {
             _state.update { it.copy(statusMessage = "Takebacks disabled in ${cur.config.opponentMode.label}") }
+            return
+        }
+        if (cur.sanHistory.isEmpty()) {
+            _state.update { it.copy(statusMessage = "No moves to undo yet") }
             return
         }
         aiJob?.cancel()
@@ -1361,6 +1388,7 @@ class GameViewModel(
                 boardHistory = newBoardHistory,
                 sanHistory = newSanHistory,
                 moveSquaresHistory = newMoveSquares,
+                liveAnalyzedMoves = cur.liveAnalyzedMoves.take(newSanHistory.size),
                 reviewPly = null,
                 selectedSquare = null,
                 legalMovesForSelected = emptyList(),
@@ -1376,8 +1404,133 @@ class GameViewModel(
                 blackHasCastled = bCastled,
                 castleGuides = computeCastleGuides(rolledBoard, wCastled, bCastled, cur.playerSide, cur.showCastleGuide),
                 conditionalMoves = emptyList(),
-                statusMessage = "Takeback applied"
+                statusMessage = "Undo applied (${newSanHistory.size} plies)"
             )
+        }
+        if (cur.isLiveAnalysisEnabled) {
+            refreshAllLiveAnalysis()
+        }
+    }
+
+    fun toggleLiveAnalysis() {
+        val nextEnabled = !_state.value.isLiveAnalysisEnabled
+        if (!nextEnabled) {
+            liveEvalJob?.cancel()
+            _state.update { it.copy(isLiveAnalysisEnabled = false, isLiveEvalRunning = false) }
+        } else {
+            _state.update { it.copy(isLiveAnalysisEnabled = true) }
+            refreshAllLiveAnalysis()
+        }
+    }
+
+    private fun refreshAllLiveAnalysis() {
+        liveEvalJob?.cancel()
+        liveEvalJob = viewModelScope.launch {
+            _state.update { it.copy(isLiveEvalRunning = true) }
+            val snapshot = _state.value
+            val evaluatedMoves = withContext(Dispatchers.Default) {
+                val existing = snapshot.liveAnalyzedMoves.toMutableList()
+                if (existing.size > snapshot.sanHistory.size) {
+                    while (existing.size > snapshot.sanHistory.size) existing.removeAt(existing.lastIndex)
+                }
+                for (i in existing.size until snapshot.sanHistory.size) {
+                    val before = snapshot.boardHistory.getOrNull(i) ?: break
+                    val after = snapshot.boardHistory.getOrNull(i + 1) ?: break
+                    val san = snapshot.sanHistory[i]
+                    existing.add(analyzeSingleLivePly(i + 1, san, before, after))
+                }
+                existing.toList()
+            }
+            val currentEval = withContext(Dispatchers.Default) {
+                engine.analyzePosition(snapshot.board, maxDepth = 3, timeLimitMs = 260L)
+            }
+            _state.update {
+                if (!it.isLiveAnalysisEnabled) it
+                else it.copy(
+                    liveAnalyzedMoves = evaluatedMoves,
+                    liveEval = currentEval,
+                    isLiveEvalRunning = false
+                )
+            }
+        }
+    }
+
+    private fun triggerLiveAnalysisUpdate(
+        boardBefore: ChessBoard,
+        boardAfter: ChessBoard,
+        san: String,
+        ply: Int
+    ) {
+        liveEvalJob?.cancel()
+        liveEvalJob = viewModelScope.launch {
+            _state.update { it.copy(isLiveEvalRunning = true) }
+            val (analyzedMove, currentEval) = withContext(Dispatchers.Default) {
+                val mv = analyzeSingleLivePly(ply, san, boardBefore, boardAfter)
+                val ev = engine.analyzePosition(boardAfter, maxDepth = 3, timeLimitMs = 240L)
+                mv to ev
+            }
+            _state.update { cur ->
+                if (!cur.isLiveAnalysisEnabled) cur
+                else {
+                    val updatedList = cur.liveAnalyzedMoves.take((ply - 1).coerceAtLeast(0)) + analyzedMove
+                    cur.copy(
+                        liveAnalyzedMoves = updatedList,
+                        liveEval = currentEval,
+                        isLiveEvalRunning = false
+                    )
+                }
+            }
+        }
+    }
+
+    private fun analyzeSingleLivePly(
+        ply: Int,
+        san: String,
+        boardBefore: ChessBoard,
+        boardAfter: ChessBoard
+    ): AnalyzedMove {
+        val moverIsWhite = boardBefore.sideToMove == PieceColor.WHITE
+        val evalBefore = engine.analyzePosition(boardBefore, maxDepth = 2, timeLimitMs = 55L)
+        val evalAfter = engine.analyzePosition(boardAfter, maxDepth = 2, timeLimitMs = 55L)
+        val bestMoverCp = if (moverIsWhite) evalBefore.centipawnsWhite else -evalBefore.centipawnsWhite
+        val playedMoverCp = if (moverIsWhite) evalAfter.centipawnsWhite else -evalAfter.centipawnsWhite
+        val cpLoss = (bestMoverCp - playedMoverCp).coerceAtLeast(0)
+        val isBest = evalBefore.bestMoveSan == san || cpLoss <= 15
+        val cls = when {
+            isBest && (playedMoverCp - bestMoverCp) >= 40 -> MoveClassification.BRILLIANT
+            isBest -> MoveClassification.BEST
+            cpLoss <= 40 -> MoveClassification.EXCELLENT
+            cpLoss <= 85 -> MoveClassification.GOOD
+            cpLoss <= 165 -> MoveClassification.INACCURACY
+            cpLoss <= 300 -> MoveClassification.MISTAKE
+            else -> MoveClassification.BLUNDER
+        }
+        return AnalyzedMove(
+            plyIndex = (ply - 1).coerceAtLeast(0),
+            moveNumber = (ply + 1) / 2,
+            isWhite = moverIsWhite,
+            playedSan = san,
+            bestSan = evalBefore.bestMoveSan.ifBlank { san },
+            evalBeforeCp = evalBefore.centipawnsWhite,
+            evalAfterCp = evalAfter.centipawnsWhite,
+            mateBefore = evalBefore.mateIn,
+            mateAfter = evalAfter.mateIn,
+            cpLoss = cpLoss,
+            classification = cls,
+            fenAfter = boardAfter.toFen()
+        )
+    }
+
+    fun applyLivePlayerName(newName: String) {
+        val clean = newName.trim().take(28)
+        if (clean.isBlank()) return
+        _state.update { cur ->
+            when (cur.config.opponentMode) {
+                PlayOpponentMode.SPECTATOR -> cur
+                PlayOpponentMode.PASS_AND_PLAY -> cur.copy(whiteName = clean)
+                else -> if (cur.playerSide == PieceColor.BLACK) cur.copy(blackName = clean)
+                else cur.copy(whiteName = clean)
+            }
         }
     }
 
@@ -1576,6 +1729,7 @@ class GameViewModel(
         clockJob?.cancel()
         aiJob?.cancel()
         coachJob?.cancel()
+        liveEvalJob?.cancel()
         conditionalJob?.cancel()
         btObserverJob?.cancel()
         voiceObserverJob?.cancel()

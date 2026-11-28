@@ -142,6 +142,7 @@ fun ProfileScreen(
             )
             else -> SettingsTab(
                 mainViewModel = mainViewModel,
+                profile = profile,
                 settings = settings,
                 onOpenThemeStudio = onOpenThemeStudio,
                 onPreviewSound = onPreviewSound
@@ -611,15 +612,82 @@ private fun MatchHistoryTab(
 @Composable
 private fun SettingsTab(
     mainViewModel: MainViewModel,
+    profile: PlayerProfileEntity,
     settings: UserSettings,
     onOpenThemeStudio: (Int) -> Unit,
     onPreviewSound: (SoundEffect) -> Unit
 ) {
+    var selectedEloFormat by remember { mutableStateOf("RAPID") }
+    val currentFmtElo = when (selectedEloFormat) {
+        "BULLET" -> profile.bulletRating
+        "BLITZ" -> profile.blitzRating
+        "CLASSICAL" -> profile.classicalRating
+        "FISCHER960" -> profile.fischerRating
+        else -> profile.rapidRating
+    }
+    val vsClubStakes = remember(currentFmtElo) {
+        RatingCalculator.calculateExpectedStakes(currentFmtElo, 1400, 10)
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                modifier = Modifier.testTag("settings_elo_calibrator")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Player Elo Rating Calibration", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        text = "Raise or calibrate your starting Elo (-50 / +50) and view odds against a 1400 Elo opponent.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(listOf("RAPID", "BLITZ", "BULLET", "CLASSICAL", "FISCHER960")) { fmt ->
+                            FilterChip(
+                                selected = selectedEloFormat == fmt,
+                                onClick = { selectedEloFormat = fmt },
+                                label = { Text(fmt) }
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("$selectedEloFormat Elo", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                text = "$currentFmtElo",
+                                style = MaterialTheme.typography.headlineMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+                                color = EmeraldPrimary
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = { mainViewModel.adjustPlayerFormatRating(selectedEloFormat, -50) },
+                                modifier = Modifier.testTag("settings_elo_minus_btn")
+                            ) { Text("-50") }
+                            Button(
+                                onClick = { mainViewModel.adjustPlayerFormatRating(selectedEloFormat, 50) },
+                                modifier = Modifier.testTag("settings_elo_plus_btn")
+                            ) { Text("+50 Elo") }
+                        }
+                    }
+                    Text(
+                        text = "Vs 1400 Elo: Win ${vsClubStakes.winProbabilityPct}% (+${vsClubStakes.winDelta}) · Loss ${vsClubStakes.lossProbabilityPct}% (${vsClubStakes.lossDelta})",
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+                        color = ChampionshipGold
+                    )
+                }
+            }
+        }
+
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

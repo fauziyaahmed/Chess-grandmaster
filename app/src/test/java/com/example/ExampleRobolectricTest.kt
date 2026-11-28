@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
@@ -59,6 +60,7 @@ class ExampleRobolectricTest {
 
     @After
     fun tearDown() {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         db.close()
     }
 
@@ -598,7 +600,9 @@ class ExampleRobolectricTest {
     @Test
     fun `daily puzzle streak card launches streak run and increments score when solved`() = runBlocking<Unit> {
         repository.ensureSeeded()
+        val vmStore = androidx.lifecycle.ViewModelStore()
         val puzzleVm = com.example.ui.viewmodel.PuzzleViewModel(repository, com.example.data.SoundEffectManager())
+        vmStore.put("puzzle", puzzleVm)
         val solvedEpochs = mutableListOf<Long>()
         val streakScores = mutableListOf<Int>()
         val dailyJob = launch(kotlinx.coroutines.Dispatchers.Unconfined) {
@@ -651,68 +655,85 @@ class ExampleRobolectricTest {
             assertEquals(1, puzzleVm.state.value.streakRunCurrent)
             assertTrue("Expected daily solved epoch emitted", solvedEpochs.isNotEmpty())
             assertEquals(listOf(1), streakScores)
+
+            // Drain asynchronous puzzle result write before @After closes the in-memory DB
+            repeat(40) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (repository.puzzleAttemptsFlow.first().isNotEmpty()) return@repeat
+                Thread.sleep(15)
+            }
         } finally {
             dailyJob.cancel()
             scoreJob.cancel()
+            vmStore.clear()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         }
     }
 
     @Test
-    fun `logical graphs render radar color outcomes and progression in profile dashboard`() {
+    fun `logical graphs render radar color outcomes and progression in profile dashboard`() = runBlocking<Unit> {
+        repository.ensureSeeded()
         val dataStore = com.example.data.preferences.SettingsDataStore(context)
+        val vmStore = androidx.lifecycle.ViewModelStore()
         val mainVm = com.example.ui.viewmodel.MainViewModel(repository, dataStore)
-        mainVm.openProfileTab(0)
-        val profile = PlayerProfileEntity(
-            username = "GraphGM",
-            rapidRating = 1540,
-            blitzRating = 1490,
-            puzzleRating = 1620,
-            longestWinStreak = 5
-        )
-        val snapshots = listOf(
-            com.example.data.local.RatingSnapshotEntity(formatKey = "RAPID", rating = 1450),
-            com.example.data.local.RatingSnapshotEntity(formatKey = "RAPID", rating = 1540)
-        )
-        val sampleMatches = listOf(
-            com.example.data.local.MatchHistoryEntity(
-                whiteName = "GraphGM", blackName = "Engine",
-                whiteRatingBefore = 1500, whiteRatingAfter = 1540,
-                blackRatingBefore = 1500, blackRatingAfter = 1460,
-                playerSide = "WHITE", variant = "STANDARD", category = "RAPID",
-                timeControlLabel = "10+0", chess960Position = 518,
-                result = "WHITE_WIN", termination = "Checkmate",
-                openingEco = "C50", openingName = "Italian",
-                movesSanCsv = "e4,e5", startFen = ChessBoard.STANDARD_FEN, finalFen = ChessBoard.STANDARD_FEN,
-                moveCount = 30, durationSeconds = 250, accuracyPercent = 91.0, pgnText = ""
+        vmStore.put("main", mainVm)
+        try {
+            mainVm.openProfileTab(0)
+            val profile = PlayerProfileEntity(
+                username = "GraphGM",
+                rapidRating = 1540,
+                blitzRating = 1490,
+                puzzleRating = 1620,
+                longestWinStreak = 5
             )
-        )
-
-        composeRule.setContent {
-            GrandmasterTheme(darkTheme = true) {
-                com.example.ui.screens.ProfileScreen(
-                    mainViewModel = mainVm,
-                    profile = profile,
-                    matches = sampleMatches,
-                    ratingSnapshots = snapshots,
-                    achievements = emptyList(),
-                    settings = com.example.data.preferences.UserSettings(dailyPuzzleStreak = 2),
-                    onOpenMatchAnalysis = {}
+            val snapshots = listOf(
+                com.example.data.local.RatingSnapshotEntity(formatKey = "RAPID", rating = 1450),
+                com.example.data.local.RatingSnapshotEntity(formatKey = "RAPID", rating = 1540)
+            )
+            val sampleMatches = listOf(
+                com.example.data.local.MatchHistoryEntity(
+                    whiteName = "GraphGM", blackName = "Engine",
+                    whiteRatingBefore = 1500, whiteRatingAfter = 1540,
+                    blackRatingBefore = 1500, blackRatingAfter = 1460,
+                    playerSide = "WHITE", variant = "STANDARD", category = "RAPID",
+                    timeControlLabel = "10+0", chess960Position = 518,
+                    result = "WHITE_WIN", termination = "Checkmate",
+                    openingEco = "C50", openingName = "Italian",
+                    movesSanCsv = "e4,e5", startFen = ChessBoard.STANDARD_FEN, finalFen = ChessBoard.STANDARD_FEN,
+                    moveCount = 30, durationSeconds = 250, accuracyPercent = 91.0, pgnText = ""
                 )
+            )
+
+            composeRule.setContent {
+                GrandmasterTheme(darkTheme = true) {
+                    com.example.ui.screens.ProfileScreen(
+                        mainViewModel = mainVm,
+                        profile = profile,
+                        matches = sampleMatches,
+                        ratingSnapshots = snapshots,
+                        achievements = emptyList(),
+                        settings = com.example.data.preferences.UserSettings(dailyPuzzleStreak = 2),
+                        onOpenMatchAnalysis = {}
+                    )
+                }
             }
+            composeRule.waitForIdle()
+
+            composeRule.onNodeWithTag("profile_dashboard_list")
+                .performScrollToNode(hasTestTag("logical_progression_graph"))
+            composeRule.onNodeWithTag("logical_progression_graph").assertIsDisplayed()
+
+            composeRule.onNodeWithTag("profile_dashboard_list")
+                .performScrollToNode(hasTestTag("logical_radar_graph"))
+            composeRule.onNodeWithTag("logical_radar_graph").assertIsDisplayed()
+
+            composeRule.onNodeWithTag("profile_dashboard_list")
+                .performScrollToNode(hasTestTag("logical_color_outcome_graph"))
+            composeRule.onNodeWithTag("logical_color_outcome_graph").assertIsDisplayed()
+        } finally {
+            vmStore.clear()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         }
-        composeRule.waitForIdle()
-
-        composeRule.onNodeWithTag("profile_dashboard_list")
-            .performScrollToNode(hasTestTag("logical_progression_graph"))
-        composeRule.onNodeWithTag("logical_progression_graph").assertIsDisplayed()
-
-        composeRule.onNodeWithTag("profile_dashboard_list")
-            .performScrollToNode(hasTestTag("logical_radar_graph"))
-        composeRule.onNodeWithTag("logical_radar_graph").assertIsDisplayed()
-
-        composeRule.onNodeWithTag("profile_dashboard_list")
-            .performScrollToNode(hasTestTag("logical_color_outcome_graph"))
-        composeRule.onNodeWithTag("logical_color_outcome_graph").assertIsDisplayed()
     }
 
     @Test
@@ -748,7 +769,10 @@ class ExampleRobolectricTest {
         composeRule.onNodeWithTag("blind_spoken_banner").assertIsDisplayed()
 
         // Step 1 & 2: Play 1. e4 through accessible piece selector & legal move buttons
-        composeRule.onNodeWithTag("blind_piece_e2").performScrollTo().performClick()
+        composeRule.onNodeWithTag("blind_piece_selector")
+            .performScrollTo()
+            .performScrollToNode(hasTestTag("blind_piece_e2"))
+        composeRule.onNodeWithTag("blind_piece_e2").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("blind_move_e2e4").performScrollTo().performClick()
         composeRule.waitForIdle()
@@ -764,5 +788,171 @@ class ExampleRobolectricTest {
         composeRule.onNodeWithTag("blind_hide_pieces_toggle").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertTrue(vm.state.value.blindfoldHidePieces)
+    }
+
+    @Test
+    fun `tactical themes filter switches daily puzzles between pin fork skewer and discovery`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val puzzleVm = com.example.ui.viewmodel.PuzzleViewModel(repository, com.example.data.SoundEffectManager())
+
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.PuzzlesScreen(
+                    puzzleViewModel = puzzleVm,
+                    profile = PlayerProfileEntity(),
+                    attempts = emptyList(),
+                    clubMembers = emptyList(),
+                    settings = com.example.data.preferences.UserSettings()
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("puzzles_tactics_list")
+            .performScrollToNode(hasTestTag("tactical_themes_filter_row"))
+        composeRule.onNodeWithTag("tactical_themes_filter_row").assertIsDisplayed()
+
+        // Filter by SKEWER and verify Skewer puzzle loads
+        composeRule.onNodeWithTag("tactical_themes_filter_row")
+            .performScrollToNode(hasTestTag("theme_filter_SKEWER"))
+        composeRule.onNodeWithTag("theme_filter_SKEWER").performClick()
+        composeRule.waitForIdle()
+        assertEquals(com.example.chess.engine.TacticalThemeFilter.SKEWER, puzzleVm.state.value.selectedThemeFilter)
+        assertTrue(puzzleVm.state.value.currentPuzzle.theme.contains("Skewer", ignoreCase = true))
+
+        // Filter by DISCOVERY and verify Discovery puzzle loads
+        composeRule.onNodeWithTag("tactical_themes_filter_row")
+            .performScrollToNode(hasTestTag("theme_filter_DISCOVERY"))
+        composeRule.onNodeWithTag("theme_filter_DISCOVERY").performClick()
+        composeRule.waitForIdle()
+        assertEquals(com.example.chess.engine.TacticalThemeFilter.DISCOVERY, puzzleVm.state.value.selectedThemeFilter)
+        assertTrue(
+            com.example.chess.engine.TacticalThemeFilter.DISCOVERY.matches(puzzleVm.state.value.currentPuzzle)
+        )
+    }
+
+    @Test
+    fun `play screen provides labeled undo draw cond analysis controls and live eval graph`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val vmStore = androidx.lifecycle.ViewModelStore()
+        val vm = com.example.ui.viewmodel.GameViewModel(repository, com.example.data.SoundEffectManager())
+        vmStore.put("game", vm)
+        try {
+            vm.startNewGame(
+                com.example.ui.viewmodel.GameSetupConfig(
+                    opponentMode = com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY
+                )
+            )
+            repeat(40) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (vm.state.value.config.opponentMode == com.example.ui.viewmodel.PlayOpponentMode.PASS_AND_PLAY) return@repeat
+                Thread.sleep(10)
+            }
+
+            composeRule.setContent {
+                GrandmasterTheme(darkTheme = true) {
+                    com.example.ui.screens.PlayScreen(
+                        gameViewModel = vm,
+                        settings = com.example.data.preferences.UserSettings(),
+                        onAnalyzeMatch = {},
+                        playerRapidRating = 1350
+                    )
+                }
+            }
+            composeRule.waitForIdle()
+
+            // Banners show White/Black names cleanly
+            composeRule.onNodeWithTag("player_banner_top").performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithTag("player_banner_bottom").performScrollTo().assertIsDisplayed()
+
+            // Make a move 1. e4
+            vm.onSquareTapped(com.example.chess.engine.Square.of(4, 1)) // e2
+            vm.onSquareTapped(com.example.chess.engine.Square.of(4, 3)) // e4
+            composeRule.waitForIdle()
+            assertEquals(listOf("e4"), vm.state.value.sanHistory)
+
+            // Toggle Live Analysis ON while playing
+            composeRule.onNodeWithTag("game_controls_bar")
+                .performScrollTo()
+                .performScrollToNode(hasTestTag("play_live_analysis_btn"))
+            composeRule.onNodeWithTag("play_live_analysis_btn").performClick()
+            repeat(60) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (vm.state.value.liveAnalyzedMoves.isNotEmpty()) return@repeat
+                Thread.sleep(15)
+            }
+            composeRule.waitForIdle()
+            assertTrue(vm.state.value.isLiveAnalysisEnabled)
+            composeRule.onNodeWithTag("live_play_analysis_card").performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithTag("logical_eval_flow_graph").performScrollTo().assertIsDisplayed()
+
+            // Test Undo button below board
+            composeRule.onNodeWithTag("game_controls_bar")
+                .performScrollTo()
+                .performScrollToNode(hasTestTag("game_takeback_btn"))
+            composeRule.onNodeWithTag("game_takeback_btn").performClick()
+            composeRule.waitForIdle()
+            assertTrue(vm.state.value.sanHistory.isEmpty())
+
+            // Test Draw button in Pass & Play
+            composeRule.onNodeWithTag("game_controls_bar")
+                .performScrollToNode(hasTestTag("game_draw_btn"))
+            composeRule.onNodeWithTag("game_draw_btn").performClick()
+            composeRule.waitForIdle()
+            assertEquals(com.example.chess.engine.GameResult.DRAW, vm.state.value.result)
+
+            // Drain asynchronous match persistence before @After closes the in-memory DB
+            repeat(40) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (repository.allMatchesFlow.first().any { it.result == "DRAW" }) return@repeat
+                Thread.sleep(15)
+            }
+        } finally {
+            vmStore.clear()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        }
+    }
+
+    @Test
+    fun `home screen elo booster updates opponent elo and win loss probabilities`() = runBlocking<Unit> {
+        repository.ensureSeeded()
+        val profile = repository.profileFlow.let {
+            var p = com.example.data.local.PlayerProfileEntity()
+            runBlocking {
+                repository.adjustPlayerFormatRating("RAPID", 100)
+            }
+            p.copy(rapidRating = 1300)
+        }
+
+        composeRule.setContent {
+            GrandmasterTheme(darkTheme = true) {
+                com.example.ui.screens.HomeScreen(
+                    profile = profile,
+                    settings = com.example.data.preferences.UserSettings(),
+                    recentMatches = emptyList(),
+                    announcements = emptyList(),
+                    dailyRewardBannerXp = null,
+                    onClaimDailyReward = {},
+                    onDismissRewardBanner = {},
+                    onStartGame = {},
+                    onOpenFischerHub = {},
+                    onOpenDailyPuzzle = {},
+                    onOpenMatchAnalysis = {},
+                    onOpenCompete = {}
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("home_list")
+            .performScrollToNode(hasTestTag("home_elo_selector"))
+        composeRule.onNodeWithText("Opponent Elo: 1400").assertIsDisplayed()
+        composeRule.onNodeWithTag("home_elo_forecast_bar").assertIsDisplayed()
+
+        // Increase opponent Elo by +50 twice -> 1500
+        composeRule.onNodeWithTag("home_elo_increase_btn").performClick()
+        composeRule.onNodeWithTag("home_elo_increase_btn").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Opponent Elo: 1500").assertIsDisplayed()
     }
 }

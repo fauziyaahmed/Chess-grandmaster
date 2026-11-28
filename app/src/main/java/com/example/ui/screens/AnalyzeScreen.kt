@@ -280,12 +280,33 @@ fun AnalyzeScreen(
             }
         }
 
-        // Full Analysis Report
+        // Move Comparison & Match-Winning Flow Graph (Directly Above Accuracy Report)
         state.fullAnalysis?.let { summary ->
+            if (summary.analyzedMoves.isNotEmpty()) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.testTag("analyze_flow_graph_card")
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            LogicalEvalFlowGraph(
+                                analyzedMoves = summary.analyzedMoves,
+                                currentPly = state.currentPly,
+                                onSelectPly = analysisViewModel::goToPly,
+                                perspectiveSide = state.perspectiveSide
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Full Analysis Report
             item {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.testTag("analyze_accuracy_report_card")
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Game Accuracy Report", style = MaterialTheme.typography.titleLarge)
@@ -309,15 +330,6 @@ fun AnalyzeScreen(
                                     color = Color(0xFF60A5FA)
                                 )
                             }
-                        }
-
-                        // Logical Eval Flow graph across plies (tap any point to jump to that ply)
-                        if (summary.analyzedMoves.isNotEmpty()) {
-                            LogicalEvalFlowGraph(
-                                analyzedMoves = summary.analyzedMoves,
-                                currentPly = state.currentPly,
-                                onSelectPly = analysisViewModel::goToPly
-                            )
                         }
 
                         // Classification summary chips

@@ -537,7 +537,9 @@ fun GrandmasterAppShell(
                                 onOpenBluetoothLobby = { showBluetoothLobbySheet = true },
                                 onToggleCoachVoice = mainViewModel::setCoachVoiceEnabled,
                                 onSaveTimeControlPreference = mainViewModel::saveTimeControlPreference,
-                                onSetCoachDavidDefault = mainViewModel::setCoachDavidDefault
+                                onSetCoachDavidDefault = mainViewModel::setCoachDavidDefault,
+                                playerRapidRating = profile.rapidRating,
+                                onRenamePlayer = mainViewModel::updateUsername
                             )
                         }
 

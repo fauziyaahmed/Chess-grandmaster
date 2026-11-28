@@ -68,6 +68,22 @@ object RatingCalculator {
         else -> 2300
     }
 
+    fun skillLevelForElo(elo: Int): Int = when {
+        elo < 780 -> 1
+        elo < 1030 -> 2
+        elo < 1280 -> 3
+        elo < 1530 -> 4
+        elo < 1780 -> 5
+        elo < 2000 -> 6
+        elo < 2200 -> 7
+        else -> 8
+    }
+
+    fun winProbabilityPercent(playerRating: Int, opponentRating: Int): Int {
+        val expected = 1.0 / (1.0 + 10.0.pow((opponentRating - playerRating) / 400.0))
+        return (expected * 100.0).roundToInt().coerceIn(1, 99)
+    }
+
     fun calculateExpectedStakes(
         playerRating: Int,
         opponentRating: Int,
@@ -76,10 +92,13 @@ object RatingCalculator {
         val winNew = calculateNewRating(playerRating, opponentRating, 1.0, gamesPlayed)
         val drawNew = calculateNewRating(playerRating, opponentRating, 0.5, gamesPlayed)
         val lossNew = calculateNewRating(playerRating, opponentRating, 0.0, gamesPlayed)
+        val winPct = winProbabilityPercent(playerRating, opponentRating)
         return MatchStakes(
             winDelta = winNew - playerRating,
             drawDelta = drawNew - playerRating,
-            lossDelta = lossNew - playerRating
+            lossDelta = lossNew - playerRating,
+            winProbabilityPct = winPct,
+            lossProbabilityPct = (100 - winPct).coerceIn(1, 99)
         )
     }
 
@@ -101,7 +120,9 @@ object RatingCalculator {
 data class MatchStakes(
     val winDelta: Int,
     val drawDelta: Int,
-    val lossDelta: Int
+    val lossDelta: Int,
+    val winProbabilityPct: Int = 50,
+    val lossProbabilityPct: Int = 50
 )
 
 data class AchievementItem(

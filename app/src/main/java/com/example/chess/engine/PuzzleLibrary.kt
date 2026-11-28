@@ -9,6 +9,17 @@ enum class PuzzleDifficulty(val label: String, val ratingRange: IntRange) {
     MASTER("Master", 1951..2400)
 }
 
+enum class TacticalThemeFilter(val label: String, val keywords: List<String>) {
+    ALL("All Themes", emptyList()),
+    PIN("Pins", listOf("Pin")),
+    FORK("Forks", listOf("Fork")),
+    SKEWER("Skewers", listOf("Skewer")),
+    DISCOVERY("Discoveries", listOf("Discovered", "Discovery"));
+
+    fun matches(puzzle: ChessPuzzle): Boolean =
+        keywords.isEmpty() || keywords.any { kw -> puzzle.theme.contains(kw, ignoreCase = true) }
+}
+
 data class ChessPuzzle(
     val id: String,
     val title: String,
@@ -341,8 +352,37 @@ object PuzzleLibrary {
             solutionUci = listOf("f7f8n", "g6f5", "f8d7"),
             hintText = "Promoting to a Queen allows 1... Qd1+ and 2. Qf1 Qxf1#! Find the only promotion that saves the game and wins.",
             explanation = "1. f8=N+! Underpromoting to a knight delivers check while forking the Black queen on d7—whereas promoting to a queen, rook, or bishop loses immediately to ...Qd1+!"
+        ),
+        ChessPuzzle(
+            id = "puz_029",
+            title = "Long Diagonal Skewer",
+            difficulty = PuzzleDifficulty.INTERMEDIATE,
+            rating = 1360,
+            theme = "Skewer",
+            fen = "8/1r6/8/3k4/8/7B/P7/6K1 w - - 0 1",
+            solutionUci = listOf("h3g2", "d5c4", "g2b7"),
+            hintText = "Place your bishop on g2 to check the Black king and skewer the rook behind it.",
+            explanation = "1. Bg2+! forces the Black king off the b7-g2 diagonal, winning the undefended rook on b7."
+        ),
+        ChessPuzzle(
+            id = "puz_030",
+            title = "Double-Check Discovery",
+            difficulty = PuzzleDifficulty.INTERMEDIATE,
+            rating = 1240,
+            theme = "Discovered Attack",
+            fen = "1qbk4/p1p2ppp/8/8/3N4/8/P4PPP/3R2K1 w - - 0 1",
+            solutionUci = listOf("d4c6", "d8e8", "c6b8"),
+            hintText = "Unleash a discovered check from your d1 rook while jumping your knight to attack the queen!",
+            explanation = "1. Nc6+! delivers a double check from both the knight and the d1 rook while attacking the b8 queen—forcing Black's king to move before losing the queen."
         )
     )
+
+    fun filterPuzzles(
+        difficulty: PuzzleDifficulty? = null,
+        theme: TacticalThemeFilter = TacticalThemeFilter.ALL
+    ): List<ChessPuzzle> = ALL_PUZZLES.filter { puzzle ->
+        (difficulty == null || puzzle.difficulty == difficulty) && theme.matches(puzzle)
+    }
 
     fun puzzleForDate(date: LocalDate = LocalDate.now()): ChessPuzzle {
         val daySeed = (date.year * 372 + date.dayOfYear)

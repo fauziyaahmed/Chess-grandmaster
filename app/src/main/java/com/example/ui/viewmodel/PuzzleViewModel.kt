@@ -11,6 +11,7 @@ import com.example.chess.engine.PieceType
 import com.example.chess.engine.PuzzleDifficulty
 import com.example.chess.engine.PuzzleLibrary
 import com.example.chess.engine.Square
+import com.example.chess.engine.TacticalThemeFilter
 import com.example.data.ChessSoundPlayer
 import com.example.data.SoundEffect
 import com.example.data.SoundPack
@@ -36,6 +37,7 @@ data class PuzzleUiState(
     val currentPuzzle: ChessPuzzle = PuzzleLibrary.puzzleForDate(),
     val isDailyChallenge: Boolean = true,
     val selectedDifficultyFilter: PuzzleDifficulty? = null,
+    val selectedThemeFilter: TacticalThemeFilter = TacticalThemeFilter.ALL,
     val board: ChessBoard = ChessBoard.fromFen(PuzzleLibrary.puzzleForDate().fen),
     val stepIndex: Int = 0,
     val selectedSquare: Int? = null,
@@ -113,10 +115,23 @@ class PuzzleViewModel(
     }
 
     fun setDifficultyFilter(difficulty: PuzzleDifficulty?) {
-        _state.update { it.copy(selectedDifficultyFilter = difficulty) }
-        val pool = if (difficulty == null) PuzzleLibrary.ALL_PUZZLES
-        else PuzzleLibrary.ALL_PUZZLES.filter { it.difficulty == difficulty }
+        val currentTheme = _state.value.selectedThemeFilter
+        val exactPool = PuzzleLibrary.filterPuzzles(difficulty, currentTheme)
+        val effectiveTheme = if (exactPool.isEmpty()) TacticalThemeFilter.ALL else currentTheme
+        val pool = if (exactPool.isNotEmpty()) exactPool else PuzzleLibrary.filterPuzzles(difficulty, TacticalThemeFilter.ALL)
+        _state.update { it.copy(selectedDifficultyFilter = difficulty, selectedThemeFilter = effectiveTheme) }
         val next = pool.firstOrNull { it.id != _state.value.currentPuzzle.id } ?: pool.first()
+        loadPuzzle(next, isDaily = false)
+    }
+
+    fun setThemeFilter(theme: TacticalThemeFilter) {
+        val currentDifficulty = _state.value.selectedDifficultyFilter
+        val exactPool = PuzzleLibrary.filterPuzzles(currentDifficulty, theme)
+        val effectiveDifficulty = if (exactPool.isEmpty()) null else currentDifficulty
+        val pool = if (exactPool.isNotEmpty()) exactPool else PuzzleLibrary.filterPuzzles(null, theme)
+        _state.update { it.copy(selectedThemeFilter = theme, selectedDifficultyFilter = effectiveDifficulty) }
+        val curId = _state.value.currentPuzzle.id
+        val next = pool.firstOrNull { it.id != curId } ?: pool.firstOrNull() ?: PuzzleLibrary.ALL_PUZZLES.first()
         loadPuzzle(next, isDaily = false)
     }
 
@@ -130,9 +145,8 @@ class PuzzleViewModel(
             }
             return
         }
-        val filter = cur.selectedDifficultyFilter
-        val pool = if (filter == null) PuzzleLibrary.ALL_PUZZLES
-        else PuzzleLibrary.ALL_PUZZLES.filter { it.difficulty == filter }
+        val pool = PuzzleLibrary.filterPuzzles(cur.selectedDifficultyFilter, cur.selectedThemeFilter)
+            .ifEmpty { PuzzleLibrary.ALL_PUZZLES }
         val curIdx = pool.indexOfFirst { it.id == cur.currentPuzzle.id }
         val next = pool[(curIdx + 1) % pool.size]
         loadPuzzle(next, isDaily = false)
@@ -170,6 +184,7 @@ class PuzzleViewModel(
             currentPuzzle = puzzle,
             isDailyChallenge = isDaily,
             selectedDifficultyFilter = _state.value.selectedDifficultyFilter,
+            selectedThemeFilter = _state.value.selectedThemeFilter,
             board = startBoard,
             stepIndex = 0,
             playerSide = startBoard.sideToMove,

@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.History
@@ -110,7 +113,9 @@ import com.example.ui.components.ChessPieceIcon
 import com.example.ui.components.CoachDavidOptionToggle
 import com.example.ui.components.ConditionalMoveSheet
 import com.example.ui.components.CountryFlag
+import com.example.ui.components.EvaluationBar
 import com.example.ui.components.InteractiveMoveHistoryCard
+import com.example.ui.components.LogicalEvalFlowGraph
 import com.example.ui.components.PromotionPickerDialog
 import com.example.ui.components.TimeControlPickerSection
 import com.example.ui.theme.BestGreen
@@ -143,7 +148,9 @@ fun PlayScreen(
     onOpenBluetoothLobby: () -> Unit = {},
     onToggleCoachVoice: (Boolean) -> Unit = {},
     onSaveTimeControlPreference: (Boolean, String, Int, Int, Int) -> Unit = { _, _, _, _, _ -> },
-    onSetCoachDavidDefault: (Boolean) -> Unit = {}
+    onSetCoachDavidDefault: (Boolean) -> Unit = {},
+    playerRapidRating: Int = 1200,
+    onRenamePlayer: (String) -> Unit = {}
 ) {
     val state by gameViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -152,6 +159,7 @@ fun PlayScreen(
     var showChatSheet by remember { mutableStateOf(false) }
     var showResignConfirm by remember { mutableStateOf(false) }
     var showConditionalSheet by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(
         settings.soundEnabled,
@@ -172,6 +180,11 @@ fun PlayScreen(
     val displayedBoard = state.displayedBoard
     val materialInfo = remember(displayedBoard) { displayedBoard.materialStats() }
 
+    val topSideColor = if (state.flipped) PieceColor.WHITE else PieceColor.BLACK
+    val bottomSideColor = if (state.flipped) PieceColor.BLACK else PieceColor.WHITE
+    val topIsHuman = state.playerSide == topSideColor
+    val bottomIsHuman = state.playerSide == bottomSideColor || state.config.opponentMode == PlayOpponentMode.PASS_AND_PLAY
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWide = maxWidth >= 700.dp
 
@@ -188,46 +201,68 @@ fun PlayScreen(
                 ) {
                     PlayerBannerRow(
                         name = if (state.flipped) state.whiteName else state.blackName,
+                        sideLabel = if (state.flipped) "White" else "Black",
+                        isHumanPlayer = topIsHuman,
                         rating = if (state.flipped) state.whiteRating else state.blackRating,
                         timeMs = if (state.flipped) state.whiteTimeMs else state.blackTimeMs,
                         isActiveTurn = state.result == GameResult.IN_PROGRESS && !state.isReviewingHistory &&
-                            displayedBoard.sideToMove == (if (state.flipped) PieceColor.WHITE else PieceColor.BLACK),
+                            displayedBoard.sideToMove == topSideColor,
                         capturedPieces = if (state.flipped) materialInfo.capturedByWhite else materialInfo.capturedByBlack,
                         pieceColor = if (state.flipped) PieceColor.BLACK else PieceColor.WHITE,
                         materialAdv = if (state.flipped) materialInfo.whiteAdvantage else -materialInfo.whiteAdvantage,
-                        settings = settings
+                        settings = settings,
+                        onEditName = if (topIsHuman) ({ showRenameDialog = true }) else null,
+                        modifier = Modifier.testTag("player_banner_top")
                     )
                     Spacer(Modifier.height(6.dp))
-                    ChessBoardView(
-                        board = displayedBoard,
-                        boardTheme = settings.boardTheme,
-                        pieceStyle = settings.pieceStyle,
-                        flipped = state.flipped,
-                        showCoordinates = settings.showCoordinates,
-                        selectedSquare = if (state.isReviewingHistory) null else state.selectedSquare,
-                        legalMovesForSelected = if (state.isReviewingHistory) emptyList() else state.legalMovesForSelected,
-                        lastMoveFrom = state.displayedLastMoveFrom,
-                        lastMoveTo = state.displayedLastMoveTo,
-                        bestMoveFrom = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowFrom else null,
-                        bestMoveTo = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowTo else null,
-                        castleGuides = if (state.isReviewingHistory) emptyList() else state.castleGuides,
-                        boardPattern = settings.boardPattern,
-                        interactive = state.result == GameResult.IN_PROGRESS,
-                        hidePiecesForBlindfold = state.blindfoldHidePieces,
-                        onSquareTapped = gameViewModel::onSquareTapped,
-                        modifier = Modifier.fillMaxWidth(settings.boardScale)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(settings.boardScale).height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (state.isLiveAnalysisEnabled) {
+                            EvaluationBar(
+                                centipawnsWhite = state.liveEval?.centipawnsWhite ?: 0,
+                                mateIn = state.liveEval?.mateIn,
+                                flipped = state.flipped,
+                                modifier = Modifier.width(14.dp).fillMaxHeight().testTag("play_live_eval_bar")
+                            )
+                        }
+                        ChessBoardView(
+                            board = displayedBoard,
+                            boardTheme = settings.boardTheme,
+                            pieceStyle = settings.pieceStyle,
+                            flipped = state.flipped,
+                            showCoordinates = settings.showCoordinates,
+                            selectedSquare = if (state.isReviewingHistory) null else state.selectedSquare,
+                            legalMovesForSelected = if (state.isReviewingHistory) emptyList() else state.legalMovesForSelected,
+                            lastMoveFrom = state.displayedLastMoveFrom,
+                            lastMoveTo = state.displayedLastMoveTo,
+                            bestMoveFrom = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowFrom else null,
+                            bestMoveTo = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowTo else null,
+                            castleGuides = if (state.isReviewingHistory) emptyList() else state.castleGuides,
+                            boardPattern = settings.boardPattern,
+                            interactive = state.result == GameResult.IN_PROGRESS,
+                            hidePiecesForBlindfold = state.blindfoldHidePieces,
+                            onSquareTapped = gameViewModel::onSquareTapped,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
                     PlayerBannerRow(
                         name = if (state.flipped) state.blackName else state.whiteName,
+                        sideLabel = if (state.flipped) "Black" else "White",
+                        isHumanPlayer = bottomIsHuman,
                         rating = if (state.flipped) state.blackRating else state.whiteRating,
                         timeMs = if (state.flipped) state.blackTimeMs else state.whiteTimeMs,
                         isActiveTurn = state.result == GameResult.IN_PROGRESS && !state.isReviewingHistory &&
-                            displayedBoard.sideToMove == (if (state.flipped) PieceColor.BLACK else PieceColor.WHITE),
+                            displayedBoard.sideToMove == bottomSideColor,
                         capturedPieces = if (state.flipped) materialInfo.capturedByBlack else materialInfo.capturedByWhite,
                         pieceColor = if (state.flipped) PieceColor.WHITE else PieceColor.BLACK,
                         materialAdv = if (state.flipped) -materialInfo.whiteAdvantage else materialInfo.whiteAdvantage,
-                        settings = settings
+                        settings = settings,
+                        onEditName = if (bottomIsHuman) ({ showRenameDialog = true }) else null,
+                        modifier = Modifier.testTag("player_banner_bottom")
                     )
                 }
 
@@ -284,11 +319,18 @@ fun PlayScreen(
                         onDraw = gameViewModel::offerDraw,
                         onTakeback = gameViewModel::requestTakeback,
                         onConditional = { showConditionalSheet = true },
+                        onToggleAnalysis = gameViewModel::toggleLiveAnalysis,
                         onFlip = gameViewModel::flipBoard,
                         onChat = { showChatSheet = true },
                         onSaveNow = gameViewModel::saveGameToHistoryNow,
                         onRematch = { gameViewModel.startNewGame(state.config) }
                     )
+                    AnimatedVisibility(visible = state.isLiveAnalysisEnabled) {
+                        LivePlayAnalysisCard(
+                            state = state,
+                            onSelectPly = gameViewModel::jumpToMovePly
+                        )
+                    }
                     AnimatedVisibility(visible = state.config.coachDavidEnabled) {
                         CoachDavidPanelCard(
                             state = state,
@@ -346,53 +388,76 @@ fun PlayScreen(
 
                 PlayerBannerRow(
                     name = if (state.flipped) state.whiteName else state.blackName,
+                    sideLabel = if (state.flipped) "White" else "Black",
+                    isHumanPlayer = topIsHuman,
                     rating = if (state.flipped) state.whiteRating else state.blackRating,
                     timeMs = if (state.flipped) state.whiteTimeMs else state.blackTimeMs,
                     isActiveTurn = state.result == GameResult.IN_PROGRESS && !state.isReviewingHistory &&
-                        displayedBoard.sideToMove == (if (state.flipped) PieceColor.WHITE else PieceColor.BLACK),
+                        displayedBoard.sideToMove == topSideColor,
                     capturedPieces = if (state.flipped) materialInfo.capturedByWhite else materialInfo.capturedByBlack,
                     pieceColor = if (state.flipped) PieceColor.BLACK else PieceColor.WHITE,
                     materialAdv = if (state.flipped) materialInfo.whiteAdvantage else -materialInfo.whiteAdvantage,
-                    settings = settings
+                    settings = settings,
+                    onEditName = if (topIsHuman) ({ showRenameDialog = true }) else null,
+                    modifier = Modifier.testTag("player_banner_top")
                 )
 
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
-                    ChessBoardView(
-                        board = displayedBoard,
-                        boardTheme = settings.boardTheme,
-                        pieceStyle = settings.pieceStyle,
-                        flipped = state.flipped,
-                        showCoordinates = settings.showCoordinates,
-                        selectedSquare = if (state.isReviewingHistory) null else state.selectedSquare,
-                        legalMovesForSelected = if (state.isReviewingHistory) emptyList() else state.legalMovesForSelected,
-                        lastMoveFrom = state.displayedLastMoveFrom,
-                        lastMoveTo = state.displayedLastMoveTo,
-                        bestMoveFrom = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowFrom else null,
-                        bestMoveTo = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowTo else null,
-                        castleGuides = if (state.isReviewingHistory) emptyList() else state.castleGuides,
-                        boardPattern = settings.boardPattern,
-                        interactive = state.result == GameResult.IN_PROGRESS,
-                        hidePiecesForBlindfold = state.blindfoldHidePieces,
-                        onSquareTapped = gameViewModel::onSquareTapped,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth(settings.boardScale)
-                            .widthIn(max = 520.dp)
-                    )
+                            .widthIn(max = 532.dp)
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (state.isLiveAnalysisEnabled) {
+                            EvaluationBar(
+                                centipawnsWhite = state.liveEval?.centipawnsWhite ?: 0,
+                                mateIn = state.liveEval?.mateIn,
+                                flipped = state.flipped,
+                                modifier = Modifier.width(12.dp).fillMaxHeight().testTag("play_live_eval_bar")
+                            )
+                        }
+                        ChessBoardView(
+                            board = displayedBoard,
+                            boardTheme = settings.boardTheme,
+                            pieceStyle = settings.pieceStyle,
+                            flipped = state.flipped,
+                            showCoordinates = settings.showCoordinates,
+                            selectedSquare = if (state.isReviewingHistory) null else state.selectedSquare,
+                            legalMovesForSelected = if (state.isReviewingHistory) emptyList() else state.legalMovesForSelected,
+                            lastMoveFrom = state.displayedLastMoveFrom,
+                            lastMoveTo = state.displayedLastMoveTo,
+                            bestMoveFrom = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowFrom else null,
+                            bestMoveTo = if (!state.isReviewingHistory && state.showCoachArrow) state.coachArrowTo else null,
+                            castleGuides = if (state.isReviewingHistory) emptyList() else state.castleGuides,
+                            boardPattern = settings.boardPattern,
+                            interactive = state.result == GameResult.IN_PROGRESS,
+                            hidePiecesForBlindfold = state.blindfoldHidePieces,
+                            onSquareTapped = gameViewModel::onSquareTapped,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
 
                 PlayerBannerRow(
                     name = if (state.flipped) state.blackName else state.whiteName,
+                    sideLabel = if (state.flipped) "Black" else "White",
+                    isHumanPlayer = bottomIsHuman,
                     rating = if (state.flipped) state.blackRating else state.whiteRating,
                     timeMs = if (state.flipped) state.blackTimeMs else state.whiteTimeMs,
                     isActiveTurn = state.result == GameResult.IN_PROGRESS && !state.isReviewingHistory &&
-                        displayedBoard.sideToMove == (if (state.flipped) PieceColor.BLACK else PieceColor.WHITE),
+                        displayedBoard.sideToMove == bottomSideColor,
                     capturedPieces = if (state.flipped) materialInfo.capturedByBlack else materialInfo.capturedByWhite,
                     pieceColor = if (state.flipped) PieceColor.WHITE else PieceColor.BLACK,
                     materialAdv = if (state.flipped) -materialInfo.whiteAdvantage else materialInfo.whiteAdvantage,
-                    settings = settings
+                    settings = settings,
+                    onEditName = if (bottomIsHuman) ({ showRenameDialog = true }) else null,
+                    modifier = Modifier.testTag("player_banner_bottom")
                 )
 
                 if (state.statusMessage.isNotBlank()) {
@@ -438,11 +503,19 @@ fun PlayScreen(
                     onDraw = gameViewModel::offerDraw,
                     onTakeback = gameViewModel::requestTakeback,
                     onConditional = { showConditionalSheet = true },
+                    onToggleAnalysis = gameViewModel::toggleLiveAnalysis,
                     onFlip = gameViewModel::flipBoard,
                     onChat = { showChatSheet = true },
                     onSaveNow = gameViewModel::saveGameToHistoryNow,
                     onRematch = { gameViewModel.startNewGame(state.config) }
                 )
+
+                AnimatedVisibility(visible = state.isLiveAnalysisEnabled) {
+                    LivePlayAnalysisCard(
+                        state = state,
+                        onSelectPly = gameViewModel::jumpToMovePly
+                    )
+                }
 
                 AnimatedVisibility(visible = state.config.coachDavidEnabled) {
                     CoachDavidPanelCard(
@@ -506,6 +579,7 @@ fun PlayScreen(
         ModalBottomSheet(onDismissRequest = { showSetupSheet = false }) {
             NewGameSetupSheet(
                 currentConfig = state.config,
+                playerRating = playerRapidRating,
                 settings = settings,
                 onStart = { cfg ->
                     showSetupSheet = false
@@ -519,6 +593,43 @@ fun PlayScreen(
                 onSaveTimeControlPreference = onSaveTimeControlPreference
             )
         }
+    }
+
+    if (showRenameDialog) {
+        var nameInput by remember {
+            mutableStateOf(
+                if (state.playerSide == PieceColor.BLACK) state.blackName else state.whiteName
+            )
+        }
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Edit Player Name") },
+            text = {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { if (it.length <= 28) nameInput = it },
+                    label = { Text("Your Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("play_rename_input")
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = nameInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onRenamePlayer(trimmed)
+                            gameViewModel.applyLivePlayerName(trimmed)
+                        }
+                        showRenameDialog = false
+                    },
+                    modifier = Modifier.testTag("play_rename_save_btn")
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showConditionalSheet) {
@@ -651,7 +762,7 @@ private fun MatchInfoPillsBar(
                     modifier = Modifier.testTag("match_rating_stakes_bar")
                 ) {
                     Text(
-                        text = "Rated · Win +${stakes.winDelta} / Draw ${signedInt(stakes.drawDelta)} / Loss ${stakes.lossDelta}",
+                        text = "Rated · Win ${stakes.winProbabilityPct}% (${signedInt(stakes.winDelta)}) · Loss ${stakes.lossProbabilityPct}% (${stakes.lossDelta})",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
                         color = EmeraldPrimary,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1020,13 +1131,17 @@ private fun coachClassificationColor(cls: MoveClassification): Color = when (cls
 @Composable
 private fun PlayerBannerRow(
     name: String,
+    sideLabel: String,
+    isHumanPlayer: Boolean,
     rating: Int,
     timeMs: Long,
     isActiveTurn: Boolean,
     capturedPieces: List<com.example.chess.engine.PieceType>,
     pieceColor: PieceColor,
     materialAdv: Int,
-    settings: UserSettings
+    settings: UserSettings,
+    onEditName: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
 ) {
     val isLowTime = timeMs < 20_000L && isActiveTurn
     Card(
@@ -1034,7 +1149,8 @@ private fun PlayerBannerRow(
             containerColor = if (isActiveTurn) MaterialTheme.colorScheme.surfaceContainerHigh
             else MaterialTheme.colorScheme.surfaceContainer
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier
     ) {
         Row(
             modifier = Modifier
@@ -1044,19 +1160,44 @@ private fun PlayerBannerRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Surface(
+                        color = if (sideLabel == "White") Color(0xFFE2E8F0) else Color(0xFF1E293B),
+                        shape = RoundedCornerShape(5.dp)
+                    ) {
+                        Text(
+                            text = if (sideLabel == "White") "W" else "B",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (sideLabel == "White") Color(0xFF0F172A) else Color(0xFFF8FAFC),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
                     Text(
-                        text = name,
+                        text = if (isHumanPlayer) "$name (You)" else name,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = "($rating)",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (onEditName != null) {
+                        IconButton(
+                            onClick = onEditName,
+                            modifier = Modifier.size(26.dp).testTag("edit_player_name_btn")
+                        ) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = "Edit Player Name",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
                 if (capturedPieces.isNotEmpty() || materialAdv > 0) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1097,7 +1238,6 @@ private fun PlayerBannerRow(
     }
 }
 
-
 @Composable
 private fun GameControlsBar(
     state: ActiveGameState,
@@ -1105,49 +1245,220 @@ private fun GameControlsBar(
     onDraw: () -> Unit,
     onTakeback: () -> Unit,
     onConditional: () -> Unit,
+    onToggleAnalysis: () -> Unit,
     onFlip: () -> Unit,
     onChat: () -> Unit,
     onSaveNow: () -> Unit,
     onRematch: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().testTag("game_controls_bar"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         if (state.result == GameResult.IN_PROGRESS) {
-            IconButton(onClick = onTakeback, modifier = Modifier.testTag("game_takeback_btn")) {
-                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Takeback")
+            item {
+                LabeledControlButton(
+                    icon = Icons.AutoMirrored.Filled.Undo,
+                    label = "Undo",
+                    onClick = onTakeback,
+                    enabled = state.sanHistory.isNotEmpty(),
+                    modifier = Modifier.testTag("game_takeback_btn")
+                )
+            }
+            item {
+                LabeledControlButton(
+                    icon = Icons.Filled.Handshake,
+                    label = "Draw",
+                    onClick = onDraw,
+                    modifier = Modifier.testTag("game_draw_btn")
+                )
             }
             if (state.config.opponentMode != PlayOpponentMode.SPECTATOR) {
-                IconButton(onClick = onConditional, modifier = Modifier.testTag("conditional_move_btn")) {
-                    Icon(
-                        Icons.Filled.AltRoute,
-                        contentDescription = "Conditional Move",
-                        tint = if (state.conditionalMoves.isNotEmpty()) ChampionshipGold else MaterialTheme.colorScheme.onSurface
+                item {
+                    LabeledControlButton(
+                        icon = Icons.Filled.AltRoute,
+                        label = if (state.conditionalMoves.isNotEmpty()) "Cond(${state.conditionalMoves.size})" else "Cond",
+                        active = state.conditionalMoves.isNotEmpty(),
+                        activeTint = ChampionshipGold,
+                        onClick = onConditional,
+                        modifier = Modifier.testTag("conditional_move_btn")
                     )
                 }
             }
-            IconButton(onClick = onDraw, modifier = Modifier.testTag("game_draw_btn")) {
-                Icon(Icons.Filled.Handshake, contentDescription = "Offer Draw")
+            item {
+                LabeledControlButton(
+                    icon = Icons.Filled.Analytics,
+                    label = "Analysis",
+                    active = state.isLiveAnalysisEnabled,
+                    activeTint = EmeraldPrimary,
+                    onClick = onToggleAnalysis,
+                    modifier = Modifier.testTag("play_live_analysis_btn")
+                )
             }
-            IconButton(onClick = onResign, modifier = Modifier.testTag("game_resign_btn")) {
-                Icon(Icons.Filled.Flag, contentDescription = "Resign")
+            item {
+                LabeledControlButton(
+                    icon = Icons.Filled.Flag,
+                    label = "Resign",
+                    onClick = onResign,
+                    modifier = Modifier.testTag("game_resign_btn")
+                )
             }
             if (state.sanHistory.isNotEmpty() && state.savedMatchId == null) {
-                IconButton(onClick = onSaveNow, modifier = Modifier.testTag("game_save_now_btn")) {
-                    Icon(Icons.Filled.BookmarkAdded, contentDescription = "Save Game to History")
+                item {
+                    LabeledControlButton(
+                        icon = Icons.Filled.BookmarkAdded,
+                        label = "Save",
+                        onClick = onSaveNow,
+                        modifier = Modifier.testTag("game_save_now_btn")
+                    )
                 }
             }
         } else {
-            IconButton(onClick = onRematch, modifier = Modifier.testTag("game_rematch_icon_btn")) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Rematch")
+            item {
+                LabeledControlButton(
+                    icon = Icons.Filled.Refresh,
+                    label = "Rematch",
+                    active = true,
+                    activeTint = EmeraldPrimary,
+                    onClick = onRematch,
+                    modifier = Modifier.testTag("game_rematch_icon_btn")
+                )
+            }
+            item {
+                LabeledControlButton(
+                    icon = Icons.Filled.Analytics,
+                    label = "Analysis",
+                    active = state.isLiveAnalysisEnabled,
+                    activeTint = EmeraldPrimary,
+                    onClick = onToggleAnalysis,
+                    modifier = Modifier.testTag("play_live_analysis_btn")
+                )
             }
         }
-        IconButton(onClick = onFlip, modifier = Modifier.testTag("game_flip_btn")) {
-            Icon(Icons.Filled.Cached, contentDescription = "Flip Board")
+        item {
+            LabeledControlButton(
+                icon = Icons.Filled.Cached,
+                label = "Flip",
+                onClick = onFlip,
+                modifier = Modifier.testTag("game_flip_btn")
+            )
         }
-        IconButton(onClick = onChat, modifier = Modifier.testTag("game_chat_btn")) {
-            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Match Chat")
+        item {
+            LabeledControlButton(
+                icon = Icons.AutoMirrored.Filled.Chat,
+                label = "Chat",
+                onClick = onChat,
+                modifier = Modifier.testTag("game_chat_btn")
+            )
+        }
+    }
+}
+
+@Composable
+private fun LabeledControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    activeTint: Color = EmeraldPrimary,
+    modifier: Modifier = Modifier
+) {
+    val bgColor = if (active) activeTint.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainerHigh
+    val fgColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+        active -> activeTint
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        color = bgColor,
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(icon, contentDescription = label, tint = fgColor, modifier = Modifier.size(17.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = fgColor,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun LivePlayAnalysisCard(
+    state: ActiveGameState,
+    onSelectPly: (Int) -> Unit
+) {
+    val playerSide = state.playerSide ?: PieceColor.WHITE
+    val playerLabel = if (playerSide == PieceColor.WHITE) state.whiteName else state.blackName
+    val oppLabel = if (playerSide == PieceColor.WHITE) state.blackName else state.whiteName
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().testTag("live_play_analysis_card")
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Live Match Analysis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = if (state.liveEval != null) {
+                            "Best: ${state.liveEval.bestMoveSan.ifBlank { "-" }} · PV: ${state.liveEval.pvSan.take(4).joinToString(" ")}"
+                        } else {
+                            "Engine analyzing current position..."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Surface(
+                    color = EmeraldPrimary.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = state.liveEval?.formattedScore() ?: "0.00",
+                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = JetBrainsMonoFontFamily),
+                        color = EmeraldPrimary,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                    )
+                }
+            }
+            if (state.isLiveEvalRunning) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
+            }
+            if (state.liveAnalyzedMoves.isNotEmpty()) {
+                LogicalEvalFlowGraph(
+                    analyzedMoves = state.liveAnalyzedMoves,
+                    currentPly = state.displayedPly,
+                    onSelectPly = onSelectPly,
+                    perspectiveSide = playerSide,
+                    playerLabel = playerLabel,
+                    opponentLabel = oppLabel
+                )
+            } else {
+                Text(
+                    text = "Play moves to track live Move Comparison & Match-Winning power across every turn.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -1285,6 +1596,7 @@ private fun signedInt(v: Int): String = if (v >= 0) "+$v" else "$v"
 @Composable
 private fun NewGameSetupSheet(
     currentConfig: GameSetupConfig,
+    playerRating: Int,
     settings: UserSettings,
     onStart: (GameSetupConfig) -> Unit,
     onOpenBluetoothLobby: () -> Unit,
@@ -1305,7 +1617,10 @@ private fun NewGameSetupSheet(
     var customIncrement by remember {
         mutableIntStateOf(currentConfig.timeControl.incrementSeconds.coerceIn(0, 60))
     }
-    var aiLevel by remember { mutableIntStateOf(currentConfig.aiSkillLevel) }
+    var selectedOppElo by remember {
+        mutableIntStateOf(currentConfig.customOpponentRating ?: RatingCalculator.eloForSkillLevel(currentConfig.aiSkillLevel))
+    }
+    var aiLevel by remember { mutableIntStateOf(RatingCalculator.skillLevelForElo(selectedOppElo)) }
     var chosenColor by remember { mutableStateOf(currentConfig.chosenColor) }
     var customPosText by remember { mutableStateOf("") }
     var coachDavidEnabled by remember { mutableStateOf(currentConfig.coachDavidEnabled || settings.coachDavidDefault) }
@@ -1401,13 +1716,73 @@ private fun NewGameSetupSheet(
         )
 
         if (mode == PlayOpponentMode.VS_AI) {
-            Text("AI Strength: Level $aiLevel (${RatingCalculator.eloForSkillLevel(aiLevel)} Elo)", style = MaterialTheme.typography.titleMedium)
-            Slider(
-                value = aiLevel.toFloat(),
-                onValueChange = { aiLevel = it.roundToInt().coerceIn(1, 8) },
-                valueRange = 1f..8f,
-                steps = 6
-            )
+            Text("Opponent Elo Strength: $selectedOppElo Elo (AI Lv.$aiLevel)", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        selectedOppElo = (selectedOppElo - 50).coerceIn(800, 2400)
+                        aiLevel = RatingCalculator.skillLevelForElo(selectedOppElo)
+                    },
+                    modifier = Modifier.testTag("setup_elo_minus_btn")
+                ) { Text("-50 Elo") }
+                Slider(
+                    value = selectedOppElo.toFloat(),
+                    onValueChange = {
+                        selectedOppElo = ((it / 50f).roundToInt() * 50).coerceIn(800, 2400)
+                        aiLevel = RatingCalculator.skillLevelForElo(selectedOppElo)
+                    },
+                    valueRange = 800f..2400f,
+                    modifier = Modifier.weight(1f)
+                )
+                FilledTonalButton(
+                    onClick = {
+                        selectedOppElo = (selectedOppElo + 50).coerceIn(800, 2400)
+                        aiLevel = RatingCalculator.skillLevelForElo(selectedOppElo)
+                    },
+                    modifier = Modifier.testTag("setup_elo_plus_btn")
+                ) { Text("+50 Elo") }
+            }
+
+            val forecastStakes = remember(playerRating, selectedOppElo) {
+                RatingCalculator.calculateExpectedStakes(playerRating, selectedOppElo, 10)
+            }
+            val drawProb = (100 - forecastStakes.winProbabilityPct - forecastStakes.lossProbabilityPct).coerceAtLeast(0)
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("setup_elo_forecast_card")
+            ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Win / Loss Forecast (Your $playerRating vs $selectedOppElo Elo)",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Win ${forecastStakes.winProbabilityPct}% (+${forecastStakes.winDelta})",
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+                            color = BestGreen
+                        )
+                        Text(
+                            text = "Draw $drawProb% (${signedInt(forecastStakes.drawDelta)})",
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Loss ${forecastStakes.lossProbabilityPct}% (${forecastStakes.lossDelta})",
+                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = JetBrainsMonoFontFamily),
+                            color = CrimsonRed
+                        )
+                    }
+                }
+            }
 
             Text("Play As", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1432,6 +1807,7 @@ private fun NewGameSetupSheet(
                         aiSkillLevel = aiLevel,
                         chosenColor = chosenColor,
                         chess960Position = pos,
+                        customOpponentRating = if (mode == PlayOpponentMode.VS_AI) selectedOppElo else null,
                         coachDavidEnabled = coachDavidEnabled,
                         isRated = isRated,
                         isBlindMode = isBlindMode

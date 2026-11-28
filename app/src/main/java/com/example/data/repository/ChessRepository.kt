@@ -90,6 +90,31 @@ class ChessRepository(private val dao: ChessDao) {
         )
     }
 
+    suspend fun adjustPlayerFormatRating(formatKey: String, delta: Int): Int {
+        val cur = dao.getProfileOnce() ?: PlayerProfileEntity()
+        val key = formatKey.uppercase()
+        val currentRating = when (key) {
+            "BULLET" -> cur.bulletRating
+            "BLITZ" -> cur.blitzRating
+            "RAPID" -> cur.rapidRating
+            "CLASSICAL" -> cur.classicalRating
+            "PUZZLE" -> cur.puzzleRating
+            else -> cur.fischerRating
+        }
+        val newRating = (currentRating + delta).coerceIn(800, 2600)
+        val updated = when (key) {
+            "BULLET" -> cur.copy(bulletRating = newRating, bulletPeak = maxOf(cur.bulletPeak, newRating))
+            "BLITZ" -> cur.copy(blitzRating = newRating, blitzPeak = maxOf(cur.blitzPeak, newRating))
+            "RAPID" -> cur.copy(rapidRating = newRating, rapidPeak = maxOf(cur.rapidPeak, newRating))
+            "CLASSICAL" -> cur.copy(classicalRating = newRating, classicalPeak = maxOf(cur.classicalPeak, newRating))
+            "PUZZLE" -> cur.copy(puzzleRating = newRating, puzzlePeak = maxOf(cur.puzzlePeak, newRating))
+            else -> cur.copy(fischerRating = newRating, fischerPeak = maxOf(cur.fischerPeak, newRating))
+        }
+        dao.upsertProfile(updated)
+        dao.insertRatingSnapshot(RatingSnapshotEntity(formatKey = key, rating = newRating))
+        return newRating
+    }
+
     suspend fun claimDailyLoginReward(): Int? {
         val cur = dao.getProfileOnce() ?: return null
         val todayEpoch = LocalDate.now().toEpochDay()

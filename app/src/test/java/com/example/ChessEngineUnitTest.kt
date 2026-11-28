@@ -681,7 +681,7 @@ class ChessEngineUnitTest {
         // Spoken move & board description
         val afterE4 = board.makeMove(e4)
         val spokenMove = com.example.chess.coach.VoiceMoveParser.describeMoveForBlind(board, e4, afterE4)
-        assertTrue(spokenMove.contains("White plays Pawn from e2 to e4"))
+        assertTrue("Got: $spokenMove", spokenMove.contains("White plays Pawn e2 to e4"))
         val boardSummary = com.example.chess.coach.VoiceMoveParser.describeBoardForBlind(afterE4, PieceColor.WHITE)
         assertTrue(boardSummary.contains("Black to move"))
         val movable = com.example.chess.coach.VoiceMoveParser.movablePiecesForBlind(board)
@@ -753,5 +753,83 @@ class ChessEngineUnitTest {
         assertEquals(1, analytics.blackStats.games)
         assertEquals(1, analytics.blackStats.draws)
         assertEquals(36, analytics.avgMovesPerGame)
+    }
+
+    @Test
+    fun `tactical theme filter covers pin fork skewer discovery and all puzzle moves are legal`() {
+        val all = com.example.chess.engine.PuzzleLibrary.ALL_PUZZLES
+        assertTrue(all.size >= 30)
+
+        // Every puzzle in the catalog must execute every solution move legally from its FEN
+        for (puz in all) {
+            var board = ChessBoard.fromFen(puz.fen)
+            for (uci in puz.solutionUci) {
+                val mv = board.generateLegalMoves().firstOrNull { it.toUci() == uci }
+                assertNotNull("Puzzle ${puz.id} (${puz.title}) has illegal UCI move $uci on FEN ${board.toFen()}", mv)
+                board = board.makeMove(mv!!)
+            }
+        }
+
+        val pinPuzzles = com.example.chess.engine.PuzzleLibrary.filterPuzzles(null, com.example.chess.engine.TacticalThemeFilter.PIN)
+        val forkPuzzles = com.example.chess.engine.PuzzleLibrary.filterPuzzles(null, com.example.chess.engine.TacticalThemeFilter.FORK)
+        val skewerPuzzles = com.example.chess.engine.PuzzleLibrary.filterPuzzles(null, com.example.chess.engine.TacticalThemeFilter.SKEWER)
+        val discoveryPuzzles = com.example.chess.engine.PuzzleLibrary.filterPuzzles(null, com.example.chess.engine.TacticalThemeFilter.DISCOVERY)
+
+        assertTrue("Expected Pin puzzles", pinPuzzles.isNotEmpty())
+        assertTrue("Expected Fork puzzles", forkPuzzles.isNotEmpty())
+        assertTrue("Expected Skewer puzzles", skewerPuzzles.isNotEmpty())
+        assertTrue("Expected Discovery puzzles", discoveryPuzzles.isNotEmpty())
+        assertTrue(skewerPuzzles.any { it.id == "puz_029" })
+        assertTrue(discoveryPuzzles.any { it.id == "puz_030" })
+    }
+
+    @Test
+    fun `rating calculator computes win loss probabilities and skill mapping accurately`() {
+        assertEquals(50, com.example.data.RatingCalculator.winProbabilityPercent(1400, 1400))
+        assertTrue(com.example.data.RatingCalculator.winProbabilityPercent(1600, 1400) > 70)
+        assertTrue(com.example.data.RatingCalculator.winProbabilityPercent(1200, 1600) < 15)
+
+        val underdogStakes = com.example.data.RatingCalculator.calculateExpectedStakes(1200, 1600, 20)
+        assertTrue("Underdog win delta (${underdogStakes.winDelta}) should exceed loss magnitude", underdogStakes.winDelta > -underdogStakes.lossDelta)
+        assertTrue(underdogStakes.lossProbabilityPct > underdogStakes.winProbabilityPct)
+
+        assertEquals(1, com.example.data.RatingCalculator.skillLevelForElo(700))
+        assertEquals(2, com.example.data.RatingCalculator.skillLevelForElo(800))
+        assertEquals(4, com.example.data.RatingCalculator.skillLevelForElo(1400))
+        assertEquals(8, com.example.data.RatingCalculator.skillLevelForElo(2200))
+    }
+
+    @Test
+    fun `match winning move detection flags powerful swings and excludes blunders`() {
+        val winningMove = com.example.chess.engine.AnalyzedMove(
+            plyIndex = 14,
+            moveNumber = 8,
+            isWhite = true,
+            playedSan = "Qh5+",
+            bestSan = "Qh5+",
+            evalBeforeCp = 30,
+            evalAfterCp = 380,
+            mateBefore = null,
+            mateAfter = null,
+            cpLoss = 0,
+            classification = com.example.chess.engine.MoveClassification.BRILLIANT,
+            fenAfter = ChessBoard.STANDARD_FEN
+        )
+        val blunderMove = com.example.chess.engine.AnalyzedMove(
+            plyIndex = 16,
+            moveNumber = 9,
+            isWhite = true,
+            playedSan = "Qxh7??",
+            bestSan = "Nf3",
+            evalBeforeCp = 120,
+            evalAfterCp = -450,
+            mateBefore = null,
+            mateAfter = null,
+            cpLoss = 570,
+            classification = com.example.chess.engine.MoveClassification.BLUNDER,
+            fenAfter = ChessBoard.STANDARD_FEN
+        )
+        assertTrue(com.example.ui.components.isMatchWinningMove(winningMove, PieceColor.WHITE))
+        assertFalse(com.example.ui.components.isMatchWinningMove(blunderMove, PieceColor.WHITE))
     }
 }

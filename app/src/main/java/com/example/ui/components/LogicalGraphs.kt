@@ -479,14 +479,44 @@ fun LogicalRatingProgressionCard(
     }
 }
 
+private val MatchWinningMagenta = Color(0xFFEC4899)
+
+fun isMatchWinningMove(
+    move: AnalyzedMove,
+    perspectiveSide: com.example.chess.engine.PieceColor = com.example.chess.engine.PieceColor.WHITE
+): Boolean {
+    val sign = if (perspectiveSide == com.example.chess.engine.PieceColor.WHITE) 1 else -1
+    val beforePersp = move.evalBeforeCp * sign
+    val afterPersp = move.evalAfterCp * sign
+    val swing = afterPersp - beforePersp
+    val isPerspectivePlayersMove = move.isWhite == (perspectiveSide == com.example.chess.engine.PieceColor.WHITE)
+    val forcingMateForPlayer = move.mateAfter != null && (
+        (perspectiveSide == com.example.chess.engine.PieceColor.WHITE && move.mateAfter > 0) ||
+            (perspectiveSide == com.example.chess.engine.PieceColor.BLACK && move.mateAfter < 0)
+        )
+    if (!isPerspectivePlayersMove) return false
+    return move.classification == MoveClassification.BRILLIANT ||
+        forcingMateForPlayer ||
+        (swing >= 140 && afterPersp >= 120) ||
+        (move.classification == MoveClassification.BEST && swing >= 100 && afterPersp >= 140)
+}
+
 @Composable
 fun LogicalEvalFlowGraph(
     analyzedMoves: List<AnalyzedMove>,
     currentPly: Int,
     onSelectPly: (Int) -> Unit,
+    perspectiveSide: com.example.chess.engine.PieceColor = com.example.chess.engine.PieceColor.WHITE,
+    playerLabel: String = if (perspectiveSide == com.example.chess.engine.PieceColor.WHITE) "White" else "Black",
+    opponentLabel: String = if (perspectiveSide == com.example.chess.engine.PieceColor.WHITE) "Black" else "White",
     modifier: Modifier = Modifier
 ) {
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    val sign = if (perspectiveSide == com.example.chess.engine.PieceColor.WHITE) 1 else -1
+    val winningCount = remember(analyzedMoves, perspectiveSide) {
+        analyzedMoves.count { isMatchWinningMove(it, perspectiveSide) }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -498,26 +528,72 @@ fun LogicalEvalFlowGraph(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Logical Advantage Flow (Tap ply to inspect)",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            val curMove = if (currentPly > 0) analyzedMoves.getOrNull(currentPly - 1) else null
-            if (curMove != null) {
-                val pawns = curMove.evalAfterCp / 100.0
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Ply $currentPly (${curMove.playedSan}): ${if (pawns >= 0) "+" else ""}${"%.1f".format(pawns)}",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
-                    color = EmeraldPrimary
+                    text = "Move Comparison & Match-Winning Flow",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
                 )
+                Text(
+                    text = "Move 1 → Endgame · Timer-Independent Position Power",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (winningCount > 0) {
+                Surface(
+                    color = MatchWinningMagenta.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "$winningCount Match-Win",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ChampionshipGold,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                }
             }
         }
 
+        val curMove = if (currentPly > 0) analyzedMoves.getOrNull(currentPly - 1) else analyzedMoves.lastOrNull()
+        if (curMove != null) {
+            val perspAfter = (curMove.evalAfterCp * sign) / 100.0
+            val perspBefore = (curMove.evalBeforeCp * sign) / 100.0
+            val delta = perspAfter - perspBefore
+            val isWinMv = isMatchWinningMove(curMove, perspectiveSide)
+            val isPlayerPly = curMove.isWhite == (perspectiveSide == com.example.chess.engine.PieceColor.WHITE)
+            val moverTag = if (isPlayerPly) playerLabel else opponentLabel
+            Surface(
+                color = if (isWinMv) MatchWinningMagenta.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Ply ${curMove.plyIndex + 1} ($moverTag): ${curMove.playedSan} vs Best ${curMove.bestSan}" +
+                            if (isWinMv) " · MATCH-WINNING!" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isWinMv) ChampionshipGold else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${if (perspAfter >= 0) "+" else ""}${"%.1f".format(perspAfter)} (${if (delta >= 0) "+" else ""}${"%.1f".format(delta)})",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+                        color = if (isWinMv) MatchWinningMagenta else if (delta >= -0.2) EmeraldPrimary else BlunderRed
+                    )
+                }
+            }
+        }
+
+        // Main Advantage Curve (Up = Powerful / Match-Winning Move, Down = Mistake / Opposition Advantage)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(110.dp)
+                .height(126.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
                 .pointerInput(analyzedMoves) {
@@ -536,7 +612,6 @@ fun LogicalEvalFlowGraph(
                 val pad = 10.dp.toPx()
                 val midY = h / 2f
 
-                // Zero equilibrium line
                 drawLine(
                     color = gridColor,
                     start = Offset(0f, midY),
@@ -546,7 +621,7 @@ fun LogicalEvalFlowGraph(
                 )
 
                 if (analyzedMoves.isEmpty()) return@Canvas
-                val values = analyzedMoves.map { it.evalAfterCp.coerceIn(-700, 700) }
+                val values = analyzedMoves.map { (it.evalAfterCp * sign).coerceIn(-700, 700) }
                 val pts = if (values.size == 1) listOf(values[0], values[0]) else values
 
                 val linePath = Path()
@@ -570,27 +645,112 @@ fun LogicalEvalFlowGraph(
                 belowFill.lineTo(lastX, midY); belowFill.close()
 
                 drawPath(aboveFill, color = EmeraldPrimary.copy(alpha = 0.28f))
-                drawPath(belowFill, color = ElectricBlue.copy(alpha = 0.28f))
-                drawPath(linePath, color = Color.White.copy(alpha = 0.9f), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+                drawPath(belowFill, color = BlunderRed.copy(alpha = 0.24f))
+                drawPath(linePath, color = Color.White.copy(alpha = 0.92f), style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
 
-                // Current ply vertical cursor
                 if (currentPly in 1..analyzedMoves.size) {
                     val curOffset = nodeOffsets[(currentPly - 1).coerceIn(0, nodeOffsets.lastIndex)]
                     drawLine(ChampionshipGold, Offset(curOffset.x, 0f), Offset(curOffset.x, h), strokeWidth = 1.5.dp.toPx())
                     drawCircle(ChampionshipGold, radius = 4.5.dp.toPx(), center = curOffset)
                 }
 
-                // Highlight Blunders, Mistakes, and Brilliant moves
+                // Highlight Match-Winning moves (Gold/Magenta Diamond) + Blunders/Mistakes/Best
                 analyzedMoves.forEachIndexed { idx, mv ->
                     val pt = nodeOffsets.getOrNull(idx) ?: return@forEachIndexed
-                    when (mv.classification) {
-                        MoveClassification.BRILLIANT -> drawCircle(BrilliantCyan, radius = 3.8.dp.toPx(), center = pt)
-                        MoveClassification.MISTAKE -> drawCircle(MistakeOrange, radius = 3.5.dp.toPx(), center = pt)
-                        MoveClassification.BLUNDER -> drawCircle(BlunderRed, radius = 4.2.dp.toPx(), center = pt)
-                        else -> Unit
+                    if (isMatchWinningMove(mv, perspectiveSide)) {
+                        drawCircle(MatchWinningMagenta.copy(alpha = 0.35f), radius = 8.5.dp.toPx(), center = pt)
+                        val r = 5.5.dp.toPx()
+                        val diamond = Path().apply {
+                            moveTo(pt.x, pt.y - r)
+                            lineTo(pt.x + r, pt.y)
+                            lineTo(pt.x, pt.y + r)
+                            lineTo(pt.x - r, pt.y)
+                            close()
+                        }
+                        drawPath(diamond, color = ChampionshipGold)
+                        drawPath(diamond, color = MatchWinningMagenta, style = Stroke(width = 1.6.dp.toPx()))
+                    } else {
+                        when (mv.classification) {
+                            MoveClassification.BRILLIANT -> drawCircle(BrilliantCyan, radius = 4.dp.toPx(), center = pt)
+                            MoveClassification.MISTAKE -> drawCircle(MistakeOrange, radius = 3.5.dp.toPx(), center = pt)
+                            MoveClassification.BLUNDER -> drawCircle(BlunderRed, radius = 4.3.dp.toPx(), center = pt)
+                            else -> Unit
+                        }
                     }
                 }
             }
+        }
+
+        // Per-Move Comparison Strip: Player (Up) vs Opposition (Down) from Move 1 to Endgame
+        if (analyzedMoves.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .pointerInput(analyzedMoves) {
+                        detectTapGestures { offset ->
+                            if (analyzedMoves.isNotEmpty() && size.width > 0) {
+                                val norm = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                val ply = (norm * (analyzedMoves.size - 1)).roundToInt() + 1
+                                onSelectPly(ply.coerceIn(1, analyzedMoves.size))
+                            }
+                        }
+                    }
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    val midY = h / 2f
+                    val count = analyzedMoves.size.coerceAtLeast(1)
+                    val slotW = w / count.toFloat()
+                    val barW = (slotW * 0.72f).coerceIn(2.dp.toPx(), 12.dp.toPx())
+
+                    drawLine(gridColor, Offset(0f, midY), Offset(w, midY), strokeWidth = 1.dp.toPx())
+
+                    analyzedMoves.forEachIndexed { idx, mv ->
+                        val isPlayerPly = mv.isWhite == (perspectiveSide == com.example.chess.engine.PieceColor.WHITE)
+                        val isWin = isMatchWinningMove(mv, perspectiveSide)
+                        val qualityFrac = (1f - (mv.cpLoss.coerceIn(0, 350) / 350f)).coerceIn(0.18f, 1f)
+                        val barH = (midY - 3.dp.toPx()) * qualityFrac
+                        val xLeft = idx * slotW + (slotW - barW) / 2f
+
+                        val barColor = when {
+                            isWin -> MatchWinningMagenta
+                            mv.classification == MoveClassification.BLUNDER -> BlunderRed
+                            mv.classification == MoveClassification.MISTAKE -> MistakeOrange
+                            isPlayerPly -> EmeraldPrimary
+                            else -> ElectricBlue
+                        }
+                        if (isPlayerPly) {
+                            drawRect(
+                                color = barColor,
+                                topLeft = Offset(xLeft, midY - barH),
+                                size = androidx.compose.ui.geometry.Size(barW, barH)
+                            )
+                        } else {
+                            drawRect(
+                                color = barColor,
+                                topLeft = Offset(xLeft, midY),
+                                size = androidx.compose.ui.geometry.Size(barW, barH)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Color Legend
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            LegendDotLabel(color = ChampionshipGold, label = "Match-Win")
+            LegendDotLabel(color = EmeraldPrimary, label = playerLabel)
+            LegendDotLabel(color = ElectricBlue, label = opponentLabel)
+            LegendDotLabel(color = MistakeOrange, label = "Mistake")
+            LegendDotLabel(color = BlunderRed, label = "Blunder")
         }
     }
 }

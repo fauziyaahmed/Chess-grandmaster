@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.chess.engine.PieceColor
 import com.example.chess.engine.PuzzleDifficulty
 import com.example.chess.engine.PuzzleLibrary
+import com.example.chess.engine.TacticalThemeFilter
 import com.example.data.local.ClubMemberEntity
 import com.example.data.local.PlayerProfileEntity
 import com.example.data.local.PuzzleAttemptEntity
@@ -171,22 +172,42 @@ fun PuzzlesScreen(
                         }
                     }
 
-                    // Difficulty Filter
+                    // Difficulty & Tactical Themes Filters
                     item {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            item {
-                                FilterChip(
-                                    selected = state.selectedDifficultyFilter == null,
-                                    onClick = { puzzleViewModel.setDifficultyFilter(null) },
-                                    label = { Text("All Levels") }
-                                )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                item {
+                                    FilterChip(
+                                        selected = state.selectedDifficultyFilter == null,
+                                        onClick = { puzzleViewModel.setDifficultyFilter(null) },
+                                        label = { Text("All Levels") }
+                                    )
+                                }
+                                items(PuzzleDifficulty.entries) { diff ->
+                                    FilterChip(
+                                        selected = state.selectedDifficultyFilter == diff,
+                                        onClick = { puzzleViewModel.setDifficultyFilter(diff) },
+                                        label = { Text(diff.label) }
+                                    )
+                                }
                             }
-                            items(PuzzleDifficulty.entries) { diff ->
-                                FilterChip(
-                                    selected = state.selectedDifficultyFilter == diff,
-                                    onClick = { puzzleViewModel.setDifficultyFilter(diff) },
-                                    label = { Text(diff.label) }
-                                )
+                            Text(
+                                text = "Tactical Themes",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = EmeraldPrimary
+                            )
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.testTag("tactical_themes_filter_row")
+                            ) {
+                                items(TacticalThemeFilter.entries) { themeFilter ->
+                                    FilterChip(
+                                        selected = state.selectedThemeFilter == themeFilter,
+                                        onClick = { puzzleViewModel.setThemeFilter(themeFilter) },
+                                        label = { Text(themeFilter.label) },
+                                        modifier = Modifier.testTag("theme_filter_${themeFilter.name}")
+                                    )
+                                }
                             }
                         }
                     }
@@ -383,15 +404,25 @@ fun PuzzlesScreen(
                         }
                     }
 
-                    // Tactical Puzzle Catalog Quick Pick
+                    // Tactical Puzzle Catalog Quick Pick (filtered by Difficulty & Tactical Theme)
+                    val catalogPuzzles = PuzzleLibrary.filterPuzzles(
+                        difficulty = state.selectedDifficultyFilter,
+                        theme = state.selectedThemeFilter
+                    )
                     item {
-                        Text("Training Catalog (${PuzzleLibrary.ALL_PUZZLES.size} Puzzles)", style = MaterialTheme.typography.titleMedium)
+                        val filterSuffix = if (state.selectedThemeFilter != TacticalThemeFilter.ALL) {
+                            " · ${state.selectedThemeFilter.label}"
+                        } else ""
+                        Text("Training Catalog (${catalogPuzzles.size} Puzzles$filterSuffix)", style = MaterialTheme.typography.titleMedium)
                     }
-                    items(PuzzleLibrary.ALL_PUZZLES) { p ->
+                    items(catalogPuzzles) { p ->
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().clickable { puzzleViewModel.loadPuzzle(p, isDaily = false) }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { puzzleViewModel.loadPuzzle(p, isDaily = false) }
+                                .testTag("catalog_puzzle_${p.id}")
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(12.dp),

@@ -124,10 +124,15 @@ fun HomeScreen(
     var customSeconds by remember(settings.customSeconds) { mutableIntStateOf(settings.customSeconds) }
     var customInc by remember(settings.customIncrementSec) { mutableIntStateOf(settings.customIncrementSec) }
     var coachDavidEnabled by remember(settings.coachDavidDefault) { mutableStateOf(settings.coachDavidDefault) }
+    var selectedOppElo by remember { mutableIntStateOf(1400) }
 
     val activeTimeControl = remember(useCustomTime, selectedPreset, customMinutes, customSeconds, customInc) {
         if (useCustomTime) TimeControl.custom(customMinutes, customSeconds, customInc) else selectedPreset
     }
+    val homeEloStakes = remember(profile.rapidRating, selectedOppElo) {
+        RatingCalculator.calculateExpectedStakes(profile.rapidRating, selectedOppElo, 10)
+    }
+    val homeDrawProb = (100 - homeEloStakes.winProbabilityPct - homeEloStakes.lossProbabilityPct).coerceAtLeast(0)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("home_list"),
@@ -229,6 +234,8 @@ fun HomeScreen(
                                             opponentMode = PlayOpponentMode.VS_AI,
                                             variant = GameVariant.STANDARD,
                                             timeControl = activeTimeControl,
+                                            aiSkillLevel = RatingCalculator.skillLevelForElo(selectedOppElo),
+                                            customOpponentRating = selectedOppElo,
                                             coachDavidEnabled = coachDavidEnabled
                                         )
                                     )
@@ -293,6 +300,69 @@ fun HomeScreen(
                             onSetCoachDavidDefault(checked)
                         }
                     )
+
+                    // Opponent Elo Booster & Win/Loss Forecast
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("home_elo_selector")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Opponent Elo: $selectedOppElo",
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Text(
+                                        text = "AI Lv.${RatingCalculator.skillLevelForElo(selectedOppElo)} · Your Rapid ${profile.rapidRating}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilledTonalButton(
+                                        onClick = { selectedOppElo = (selectedOppElo - 50).coerceIn(800, 2400) },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.testTag("home_elo_decrease_btn")
+                                    ) { Text("-50") }
+                                    Button(
+                                        onClick = { selectedOppElo = (selectedOppElo + 50).coerceIn(800, 2400) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.testTag("home_elo_increase_btn")
+                                    ) { Text("+50 Elo") }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().testTag("home_elo_forecast_bar"),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Win ${homeEloStakes.winProbabilityPct}% (+${homeEloStakes.winDelta})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = EmeraldPrimary
+                                )
+                                Text(
+                                    text = "Draw $homeDrawProb%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Loss ${homeEloStakes.lossProbabilityPct}% (${homeEloStakes.lossDelta})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color(0xFFEF4444)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -426,7 +496,7 @@ fun HomeScreen(
                 ) {
                     ArenaModeTile(
                         title = "Play vs AI",
-                        subtitle = "${activeTimeControl.label} · ${if (coachDavidEnabled) "Coach David On" else "8 Elo Levels"}",
+                        subtitle = "${activeTimeControl.label} · $selectedOppElo Elo",
                         icon = Icons.Filled.SmartToy,
                         accent = EmeraldPrimary,
                         modifier = Modifier.weight(1f).testTag("mode_vs_ai"),
@@ -435,6 +505,8 @@ fun HomeScreen(
                                 GameSetupConfig(
                                     opponentMode = PlayOpponentMode.VS_AI,
                                     timeControl = activeTimeControl,
+                                    aiSkillLevel = RatingCalculator.skillLevelForElo(selectedOppElo),
+                                    customOpponentRating = selectedOppElo,
                                     coachDavidEnabled = coachDavidEnabled
                                 )
                             )

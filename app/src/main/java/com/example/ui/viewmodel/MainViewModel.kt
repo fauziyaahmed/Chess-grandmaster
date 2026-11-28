@@ -388,6 +388,19 @@ class MainViewModel(
         }
     }
 
+    fun updateUsername(username: String) {
+        viewModelScope.launch {
+            val cur = profile.value
+            repository.updateProfileDetails(username, cur.countryCode, cur.bio)
+        }
+    }
+
+    fun adjustPlayerFormatRating(formatKey: String, delta: Int) {
+        viewModelScope.launch {
+            repository.adjustPlayerFormatRating(formatKey, delta)
+        }
+    }
+
     fun createTournament(
         title: String,
         systemType: String,

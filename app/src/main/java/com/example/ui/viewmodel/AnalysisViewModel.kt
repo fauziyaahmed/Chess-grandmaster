@@ -35,6 +35,7 @@ data class AnalysisUiState(
     val moveSquares: List<Pair<Int, Int>> = emptyList(),
     val currentPly: Int = 0,
     val flipped: Boolean = false,
+    val perspectiveSide: com.example.chess.engine.PieceColor = com.example.chess.engine.PieceColor.WHITE,
     val selectedSquare: Int? = null,
     val legalMovesForSelected: List<Move> = emptyList(),
     val liveEval: EngineEvaluation? = null,
@@ -74,13 +75,19 @@ class AnalysisViewModel(
     fun loadMatch(match: MatchHistoryEntity) {
         val variant = if (match.variant == GameVariant.FISCHER960.name) GameVariant.FISCHER960 else GameVariant.STANDARD
         val sanList = if (match.movesSanCsv.isBlank()) emptyList() else match.movesSanCsv.split("|")
+        val side = if (match.playerSide == com.example.chess.engine.PieceColor.BLACK.name) {
+            com.example.chess.engine.PieceColor.BLACK
+        } else {
+            com.example.chess.engine.PieceColor.WHITE
+        }
         loadGameSequence(
             title = "${match.whiteName} vs ${match.blackName}",
             startFen = match.startFen,
             sanMoves = sanList,
             variant = variant,
             chess960Pos = match.chess960Position,
-            pgn = match.pgnText
+            pgn = match.pgnText,
+            perspectiveSide = side
         )
     }
 
@@ -117,7 +124,8 @@ class AnalysisViewModel(
         sanMoves: List<String>,
         variant: GameVariant,
         chess960Pos: Int,
-        pgn: String
+        pgn: String,
+        perspectiveSide: com.example.chess.engine.PieceColor = com.example.chess.engine.PieceColor.WHITE
     ) {
         fullAnalysisJob?.cancel()
         autoPlayJob?.cancel()
@@ -146,6 +154,8 @@ class AnalysisViewModel(
             sanMoves = validSans,
             moveSquares = squares,
             currentPly = boards.lastIndex,
+            flipped = perspectiveSide == com.example.chess.engine.PieceColor.BLACK,
+            perspectiveSide = perspectiveSide,
             openingEco = if (explorer.eco != "A00" && validSans.isEmpty()) explorer.eco else eco,
             openingName = if (validSans.isEmpty()) openName else if (eco == "A00" && explorer.eco != "A00") explorer.openingName else openName,
             loadedPgn = pgn,
